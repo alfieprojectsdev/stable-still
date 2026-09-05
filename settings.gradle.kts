@@ -7,6 +7,7 @@ pluginManagement {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("androidx.*")
                 includeGroupByRegex("com\\.google\\.android.*")
+                includeGroupByRegex("com\\.google\\.testing.*")
             }
         }
     }
@@ -24,6 +25,7 @@ dependencyResolutionManagement {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("androidx.*")
                 includeGroupByRegex("com\\.google\\.android.*")
+                includeGroupByRegex("com\\.google\\.testing.*")
             }
         }
     }
