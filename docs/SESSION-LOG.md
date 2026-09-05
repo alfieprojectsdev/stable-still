@@ -155,9 +155,9 @@ across many.
   the 20-vs-30 fps comparison still wants daylight at both resolutions.
 - The crop margin is unexamined against a **shaky** hand; every burst so far
   was steady.
-- **Phase 3 has still never executed.** The GPU warp and merge are the last
-  untested stage, and now the cheapest to test: there is a known-good burst and
-  a known-good alignment plan to feed them.
+- **rejectSigma is a constant where it should be a function of noise.** 0.10
+  loses more than half the available averaging at ISO 1047; 0.40 recovers it
+  but is untested against anything that moves.
 - `recommendedStackDepth()` returns 12 for every size this camera offers; the
   clamp binds, never the RAM budget. 214 MB of native buffers on a 3.4 GB phone
   is ungoverned.
