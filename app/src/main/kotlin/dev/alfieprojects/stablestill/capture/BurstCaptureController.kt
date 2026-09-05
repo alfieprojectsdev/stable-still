@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Size
 import dev.alfieprojects.stablestill.motion.GyroRecorder
+import dev.alfieprojects.stablestill.pipeline.BurstReplayer
+import dev.alfieprojects.stablestill.pipeline.ReplayResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -160,4 +162,22 @@ class BurstCaptureController(private val context: Context) {
     /** The command that pulls a saved burst to a laptop. */
     fun pullCommand(burst: SavedBurst): String =
         "adb pull ${burst.directory.absolutePath}"
+
+    /** Saved bursts, newest first. */
+    fun savedBursts(): List<File> =
+        outputRoot.listFiles { f: File -> f.isDirectory }?.sortedDescending() ?: emptyList()
+
+    /**
+     * Stacks the most recent saved burst on the GPU.
+     *
+     * Runs against fixed input on purpose. A live capture differs every time -
+     * light, tremor, anchor - so a merge that looks wrong says nothing about
+     * whether the shaders or the hand were at fault. Replaying a saved burst
+     * holds the pixels and the plan still, and any change in the output came
+     * from the code.
+     */
+    suspend fun replayLatest(): ReplayResult = withContext(Dispatchers.IO) {
+        val latest = savedBursts().firstOrNull() ?: error("No saved bursts to replay")
+        BurstReplayer(File(context.getExternalFilesDir(null), "captures")).replay(latest)
+    }
 }

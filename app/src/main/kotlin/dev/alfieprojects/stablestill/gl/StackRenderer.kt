@@ -1,9 +1,9 @@
 package dev.alfieprojects.stablestill.gl
 
 import android.graphics.Bitmap
-import android.media.Image
+import dev.alfieprojects.stablestill.core.FrameMeta
 import android.opengl.GLES30
-import dev.alfieprojects.stablestill.capture.CapturedFrame
+
 import dev.alfieprojects.stablestill.core.AlignmentPlan
 import dev.alfieprojects.stablestill.core.Mat3
 import java.nio.ByteBuffer
@@ -84,8 +84,8 @@ class StackRenderer(
      * than the crop margin can absorb, so including them would drag undefined
      * pixels into the result.
      */
-    fun render(frames: List<CapturedFrame>, plan: AlignmentPlan): Bitmap {
-        val byIndex = frames.associateBy { it.meta.index }
+    fun render(frames: List<RenderFrame>, plan: AlignmentPlan): Bitmap {
+        val byIndex = frames.associateBy { it.index }
         val anchorFrame = byIndex[plan.anchorIndex]
             ?: error("Anchor frame ${plan.anchorIndex} is missing from the burst")
         val anchorAlignment = plan.alignments.first { it.frameIndex == plan.anchorIndex }
@@ -95,17 +95,17 @@ class StackRenderer(
         GLES30.glViewport(0, 0, outputWidth, outputHeight)
 
         // Pass 1 - the reference.
-        uploadFrame(anchorFrame.image)
+        uploadFrame(anchorFrame.source)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, anchorFbo)
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(anchorProgram)
-        bindPlaneUniforms(anchorProgram, anchorFrame.image)
+        bindPlaneUniforms(anchorProgram, anchorFrame.source)
         setMatrix(anchorProgram, "uSampling", anchorAlignment.samplingMatrix)
         setVec2(anchorProgram, "uOutputSize", outputWidth.toFloat(), outputHeight.toFloat())
         setVec2(
             anchorProgram, "uSourceSize",
-            anchorFrame.meta.width.toFloat(), anchorFrame.meta.height.toFloat(),
+            anchorFrame.source.width.toFloat(), anchorFrame.source.height.toFloat(),
         )
         drawFullscreen()
 
@@ -121,8 +121,8 @@ class StackRenderer(
         for (alignment in plan.alignments) {
             if (!alignment.usable) continue
             val frame = byIndex[alignment.frameIndex] ?: continue
-            uploadFrame(frame.image)
-            bindPlaneUniforms(warpProgram, frame.image)
+            uploadFrame(frame.source)
+            bindPlaneUniforms(warpProgram, frame.source)
 
             GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, anchorTex)
@@ -132,7 +132,7 @@ class StackRenderer(
             setVec2(warpProgram, "uOutputSize", outputWidth.toFloat(), outputHeight.toFloat())
             setVec2(
                 warpProgram, "uSourceSize",
-                frame.meta.width.toFloat(), frame.meta.height.toFloat(),
+                frame.source.width.toFloat(), frame.source.height.toFloat(),
             )
             GLES30.glUniform1f(
                 GLES30.glGetUniformLocation(warpProgram, "uRejectSigma"), rejectSigma
@@ -202,29 +202,32 @@ class StackRenderer(
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
     }
 
-    private fun isSemiPlanar(image: Image): Boolean = image.planes[1].pixelStride == 2
+    // Nothing here knows about Camera2 any more: a live frame and one read back
+    // from a saved burst reach these shaders by exactly the same path.
 
-    private fun uploadFrame(image: Image) {
-        val w = image.width
-        val h = image.height
+    private fun uploadFrame(source: YuvSource) {
+        val w = source.width
+        val h = source.height
 
-        uploadPlane(yTex, image.planes[0].buffer, image.planes[0].rowStride, 1, w, h, GLES30.GL_R8, GLES30.GL_RED)
+        val y = source.plane(0)
+        uploadPlane(yTex, y.buffer, y.rowStride, y.pixelStride, w, h, GLES30.GL_R8, GLES30.GL_RED)
 
-        if (isSemiPlanar(image)) {
+        val u = source.plane(1)
+        if (source.semiPlanar) {
             // Interleaved chroma. planes[1] points at the first Cb byte and the
             // next byte is Cr for both NV12 and NV21 layouts, so a single RG
             // texture reads correctly either way.
             uploadPlane(
-                uTex, image.planes[1].buffer, image.planes[1].rowStride, 2,
+                uTex, u.buffer, u.rowStride, 2,
                 w / 2, h / 2, GLES30.GL_RG8, GLES30.GL_RG,
             )
         } else {
             uploadPlane(
-                uTex, image.planes[1].buffer, image.planes[1].rowStride, 1,
+                uTex, u.buffer, u.rowStride, u.pixelStride,
                 w / 2, h / 2, GLES30.GL_R8, GLES30.GL_RED,
             )
             uploadPlane(
-                vTex, image.planes[2].buffer, image.planes[2].rowStride, 1,
+                vTex, source.plane(2).buffer, source.plane(2).rowStride, source.plane(2).pixelStride,
                 w / 2, h / 2, GLES30.GL_R8, GLES30.GL_RED,
             )
         }
@@ -289,7 +292,7 @@ class StackRenderer(
         return out
     }
 
-    private fun bindPlaneUniforms(program: Int, image: Image) {
+    private fun bindPlaneUniforms(program: Int, source: YuvSource) {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, yTex)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uY"), 0)
@@ -304,7 +307,7 @@ class StackRenderer(
 
         GLES30.glUniform1i(
             GLES30.glGetUniformLocation(program, "uSemiPlanar"),
-            if (isSemiPlanar(image)) 1 else 0,
+            if (source.semiPlanar) 1 else 0,
         )
     }
 
@@ -329,17 +332,15 @@ class StackRenderer(
         buffer.rewind()
         val bitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
         bitmap.copyPixelsFromBuffer(buffer)
-        // GL's origin is bottom-left, Bitmap's is top-left.
-        return flipVertically(bitmap)
-    }
-
-    private fun flipVertically(source: Bitmap): Bitmap {
-        val matrix = android.graphics.Matrix().apply { preScale(1f, -1f) }
-        val flipped = Bitmap.createBitmap(
-            source, 0, 0, source.width, source.height, matrix, false
-        )
-        if (flipped != source) source.recycle()
-        return flipped
+        // No flip here, and that is not an oversight - there are two of them and
+        // they cancel. The vertex shader gives vUv.y = 0 at the framebuffer's
+        // *bottom*, so the shader writes source row 0 there; glReadPixels then
+        // reads bottom row first into a Bitmap that fills top row first. Undoing
+        // "GL is bottom-left" a second time turned the output upside down, which
+        // a stack of an ordinary room is remarkably good at hiding: measured
+        // against its own anchor frame it correlated at 0.9885 flipped and
+        // 0.0069 unflipped.
+        return bitmap
     }
 
     override fun close() {
@@ -349,5 +350,19 @@ class StackRenderer(
         GLES30.glDeleteFramebuffers(3, intArrayOf(accumFbo, anchorFbo, resultFbo), 0)
         GLES30.glDeleteTextures(6, intArrayOf(accumTex, anchorTex, resultTex, yTex, uTex, vTex), 0)
         GLES30.glDeleteVertexArrays(1, intArrayOf(vao), 0)
+    }
+}
+
+/**
+ * One frame as the renderer needs it: an index to match against the alignment
+ * plan, and somewhere to read planes from.
+ *
+ * Deliberately not a [dev.alfieprojects.stablestill.capture.CapturedFrame].
+ * That type owns an ImageReader slot and ties the merge to a running camera;
+ * this one is equally happy holding a frame read off disk.
+ */
+data class RenderFrame(val index: Int, val source: YuvSource) {
+    companion object {
+        fun of(meta: FrameMeta, source: YuvSource) = RenderFrame(meta.index, source)
     }
 }

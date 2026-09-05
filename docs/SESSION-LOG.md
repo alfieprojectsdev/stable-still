@@ -164,3 +164,42 @@ across many.
 - **Document capture was raised as a product direction** and is recorded in the
   handover. It would promote optical refinement to a requirement, because a
   gyroscope cannot see the translation that dominates at page distance.
+
+### Phase 3 executed, against a saved burst
+
+The GPU path had never run. It does now, driven from disk rather than a live
+camera - `StackRenderer` took a Camera2 `Image` directly, which quietly made
+the merge untestable, since an `Image` comes from an `ImageReader` and cannot
+be built from a file. Behind a `YuvSource` interface a saved burst feeds the
+same shaders as a live frame.
+
+Triggered by intent, because synthetic input is blocked on this handset:
+
+```
+adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
+    --ez autoReplay true --es rejectSigma 0.40
+```
+
+Device and JVM agree exactly - anchor 1, worst shift 43.1 px - which is a
+useful cross-check that `:core` and `:app` are solving the same problem.
+
+**The output was upside down.** Two vertical flips where one was needed: the
+vertex shader gives `vUv.y = 0` at the framebuffer's *bottom*, so it writes
+source row 0 there, and `glReadPixels` reads bottom-first into a Bitmap that
+fills top-first. Those cancel; the explicit flip undid the correction again.
+Measured against its own anchor frame the output correlated **0.9885 flipped,
+0.0069 unflipped** - a stack of an ordinary room hides this almost perfectly
+by eye, which is why it was worth measuring rather than looking.
+
+**`rejectSigma = 0.10` is far too tight at ISO 1047.** Noise in flat tiles,
+source 9.87:
+
+| sigma | 0.10 | 0.40 |
+|---|---|---|
+| stacked noise | 5.85 | 3.29 |
+| reduction | 1.69x | 3.0x |
+
+At 0.10, eight frames bought 2.9 frames' worth of averaging. The default is
+deliberately unchanged: a static room cannot ghost, so this says nothing about
+the moving-subject case the rejection exists for. The fix is a sigma that
+scales with measured noise, not a different constant.

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import dev.alfieprojects.stablestill.capture.BurstCaptureController
 import dev.alfieprojects.stablestill.capture.CaptureOption
 import dev.alfieprojects.stablestill.capture.SavedBurst
+import dev.alfieprojects.stablestill.pipeline.ReplayResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -59,6 +60,8 @@ fun CaptureScreen(
     var running by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf<SavedBurst?>(null) }
+    var replaying by remember { mutableStateOf(false) }
+    var replay by remember { mutableStateOf<ReplayResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     // Polled rather than pushed: the counters live on the capture thread, and a
@@ -170,6 +173,46 @@ fun CaptureScreen(
                 },
             ) {
                 Text("Save burst")
+            }
+        }
+
+        // Deliberately usable while the camera is stopped: replaying reads from
+        // disk and needs no capture session, and Phase 3 is easier to judge when
+        // the camera is not also competing for memory.
+        OutlinedButton(
+            enabled = !saving && !replaying,
+            onClick = {
+                replaying = true
+                error = null
+                replay = null
+                scope.launch {
+                    runCatching { controller.replayLatest() }
+                        .onSuccess { replay = it }
+                        .onFailure { error = it.message ?: it.toString() }
+                    replaying = false
+                }
+            },
+        ) {
+            Text("Stack latest burst (GPU)")
+        }
+
+        if (replaying) {
+            CircularProgressIndicator()
+            Text("Warping and merging...", style = MaterialTheme.typography.bodySmall)
+        }
+
+        replay?.let { r ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Stacked", style = MaterialTheme.typography.titleMedium)
+                    Field("Source", r.sourceDirectory.name)
+                    Field("Frames merged", "${r.framesMerged} / ${r.framesTotal}")
+                    Field("Anchor", "${r.anchorIndex}")
+                    Field("Output", "${r.outputWidth} x ${r.outputHeight}")
+                    Field("Max shift", "%.1f px".format(r.maxCornerShiftPx))
+                    Field("Took", "${r.elapsedMillis} ms")
+                    Text(r.output.name, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 

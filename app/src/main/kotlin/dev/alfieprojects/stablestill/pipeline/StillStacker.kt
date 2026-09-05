@@ -14,6 +14,8 @@ import dev.alfieprojects.stablestill.core.Mat3
 import dev.alfieprojects.stablestill.core.MotionTrack
 import dev.alfieprojects.stablestill.core.SyncCalibration
 import dev.alfieprojects.stablestill.gl.EglCore
+import dev.alfieprojects.stablestill.gl.ImageYuvSource
+import dev.alfieprojects.stablestill.gl.RenderFrame
 import dev.alfieprojects.stablestill.gl.StackRenderer
 import dev.alfieprojects.stablestill.motion.GyroRecorder
 import dev.alfieprojects.stablestill.probe.GyroGrade
@@ -179,7 +181,10 @@ class StillStacker(
             renderer.rejectSigma = settings.rejectSigma
             return renderer.use {
                 it.setup()
-                it.render(frames, plan)
+                it.render(
+                    frames.map { f -> RenderFrame(f.meta.index, ImageYuvSource(f.image)) },
+                    plan,
+                )
             }
         }
     }

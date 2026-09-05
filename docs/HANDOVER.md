@@ -17,7 +17,7 @@ warp and merge - has still never executed.
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
 | 2 | Motion maths | **51 unit tests passing**, including a real-burst replay. |
-| 3 | GPU warp + merge | Written. **Never run.** |
+| 3 | GPU warp + merge | **Runs. Replays a saved burst; one flip bug fixed.** |
 | 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
 | 5 | Product UX | Not started. |
 
@@ -33,7 +33,7 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Run the GPU path against a saved burst.**
+**Make `rejectSigma` scale with noise, then re-shoot in daylight.**
 
 Capture and replay both work now. A burst goes to disk, comes back on a JVM,
 and produces a sensible alignment plan - `BurstReplayTest` does exactly that
