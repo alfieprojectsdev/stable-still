@@ -9,6 +9,10 @@ package dev.alfieprojects.stablestill.core
  * @param rollingShutterSkewNanos `CaptureResult.SENSOR_ROLLING_SHUTTER_SKEW`,
  *   the delay between the first and last row starting exposure. Zero if the
  *   device does not report it, which costs accuracy but never correctness.
+ * @param sensitivityIso `CaptureResult.SENSOR_SENSITIVITY`. Not used to place a
+ *   pixel, but a merge cannot normalise brightness between frames without it:
+ *   two frames of one scene at the same exposure and different gain differ by a
+ *   factor no amount of alignment explains. Zero when unknown.
  */
 data class FrameMeta(
     val index: Int,
@@ -17,6 +21,7 @@ data class FrameMeta(
     val rollingShutterSkewNanos: Long = 0L,
     val width: Int,
     val height: Int,
+    val sensitivityIso: Int = 0,
 ) {
     /** Exposure midpoint of image row [y], accounting for rolling-shutter readout. */
     fun rowMidExposureNanos(y: Int): Long {

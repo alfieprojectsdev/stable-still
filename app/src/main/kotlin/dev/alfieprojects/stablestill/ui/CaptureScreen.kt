@@ -55,6 +55,7 @@ fun CaptureScreen(
 
     var option by remember { mutableStateOf(CaptureOption.FULL) }
     var depth by remember { mutableIntStateOf(8) }
+    var capNanos by remember { mutableStateOf<Long?>(20_000_000L) }
     var running by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf<SavedBurst?>(null) }
@@ -113,6 +114,19 @@ fun CaptureScreen(
                         Choice("$d", selected = depth == d, enabled = !running) { depth = d }
                     }
                 }
+                Text("Max exposure", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EXPOSURE_CAPS.forEach { (label, nanos) ->
+                        Choice(label, selected = capNanos == nanos, enabled = !running) {
+                            capNanos = nanos
+                        }
+                    }
+                }
+                Text(
+                    "Auto lets AE spend the whole frame period on one exposure - 50 ms " +
+                        "at 20 fps here - and that blur is baked into the anchor.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 val megabytes = option.frameBytes * (depth + 3) / (1024 * 1024)
                 Text(
                     "$megabytes MB of image buffers while running; a burst spans " +
@@ -132,7 +146,7 @@ fun CaptureScreen(
                         running = false
                     } else {
                         scope.launch {
-                            runCatching { controller.start(option, depth) }
+                            runCatching { controller.start(option, depth, capNanos) }
                                 .onSuccess { running = true }
                                 .onFailure { error = it.message ?: it.toString() }
                         }
@@ -166,6 +180,8 @@ fun CaptureScreen(
                     Field("Buffered frames", "$buffered / $depth")
                     Field("Delivered", "$delivered")
                     Field("Gyroscope", if (controller.hasGyroscope) "recording" else "absent")
+                    Field("Exposure", "${controller.exposureNanos / 1_000_000} ms")
+                    Field("ISO", "${controller.iso}")
                     if (buffered < 2) {
                         Text(
                             "Waiting for the buffer to fill.",
@@ -215,6 +231,13 @@ private fun SavedBurstCard(s: SavedBurst, pullCommand: String) {
         }
     }
 }
+
+/** Auto, plus the exposure the design assumes and half of it. */
+private val EXPOSURE_CAPS: List<Pair<String, Long?>> = listOf(
+    "Auto" to null,
+    "20 ms" to 20_000_000L,
+    "10 ms" to 10_000_000L,
+)
 
 @Composable
 private fun Choice(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {

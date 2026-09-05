@@ -53,6 +53,30 @@ class CaptureEngine(
 
     private var cameraCharacteristics: CameraCharacteristics? = null
     private var targetFps: Int? = null
+
+    /**
+     * Longest exposure a frame may use, or null to leave auto-exposure alone.
+     *
+     * Capping this is not a preference. Left to itself AE spends the entire
+     * frame period on one exposure - 50 ms at 20 fps on this device - and the
+     * blur that buys is baked into the anchor, where no amount of alignment
+     * removes it. Stacking exists to trade noise for sharpness; an exposure that
+     * long has already spent the sharpness.
+     */
+    private var maxExposureNanos: Long? = null
+
+    /** Set once AE has metered the scene and manual values have been applied. */
+    @Volatile
+    private var exposureLocked = false
+
+    /** What the cap actually resolved to, for the UI and the burst notes. */
+    @Volatile
+    var appliedExposureNanos: Long = 0L
+        private set
+
+    @Volatile
+    var appliedIso: Int = 0
+        private set
     private var cameraDevice: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
@@ -75,12 +99,19 @@ class CaptureEngine(
         private set
 
     @SuppressLint("MissingPermission")
-    suspend fun start(preview: Surface?, requestedSize: Size, targetFps: Int? = null) {
+    suspend fun start(
+        preview: Surface?,
+        requestedSize: Size,
+        targetFps: Int? = null,
+        maxExposureNanos: Long? = null,
+    ) {
         val id = selectBackCamera() ?: error("No back-facing camera available")
         cameraId = id
         val characteristics = cameraManager.getCameraCharacteristics(id)
         cameraCharacteristics = characteristics
         this.targetFps = targetFps
+        this.maxExposureNanos = maxExposureNanos
+        exposureLocked = false
 
         val t = HandlerThread("capture-engine").apply { start() }
         thread = t
@@ -160,19 +191,91 @@ class CaptureEngine(
         ) {
             val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
             val reader = imageReader ?: return
+            val exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
+            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
             pendingResults[timestamp] = FrameMeta(
                 index = 0, // assigned when the burst is taken
                 sensorTimestampNanos = timestamp,
-                exposureTimeNanos = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L,
-                // Absent on many LIMITED devices. Zero is a defensible default:
-                // it degrades per-row correction, it does not break alignment.
+                exposureTimeNanos = exposure,
+                // Some HALs under-declare this key and deliver it anyway, so read
+                // it unconditionally rather than trusting availableCaptureResultKeys.
                 rollingShutterSkewNanos =
                     result.get(CaptureResult.SENSOR_ROLLING_SHUTTER_SKEW) ?: 0L,
                 width = reader.width,
                 height = reader.height,
+                sensitivityIso = iso,
             )
+            appliedExposureNanos = exposure
+            appliedIso = iso
+            maybeLockExposure(exposure, iso)
             tryPair(timestamp)
         }
+    }
+
+    /**
+     * Once AE has settled, replace it with the same exposure value clamped to
+     * the cap, trading the lost light for gain.
+     *
+     * Metering is left to AE rather than reinvented: AE is good at deciding how
+     * much light a scene needs, and bad only at deciding how long to spend
+     * collecting it. So this waits for its answer, keeps the total, and
+     * redistributes it - `iso * exposure / cap` is the same exposure-times-gain
+     * product, moved off the axis that costs sharpness.
+     *
+     * Applied once. Re-locking on every frame would fight AE's own convergence
+     * and produce a burst whose frames differ in brightness, which is precisely
+     * what the merge cannot absorb.
+     */
+    private fun maybeLockExposure(exposure: Long, iso: Int) {
+        val cap = maxExposureNanos ?: return
+        if (exposureLocked || exposure <= 0L || iso <= 0) return
+        if (exposure <= cap) return
+
+        val c = cameraCharacteristics ?: return
+        val isoRange = c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val exposureRange = c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        if (isoRange == null || exposureRange == null) {
+            Log.w(TAG, "No manual exposure range; leaving AE alone")
+            exposureLocked = true
+            return
+        }
+
+        val targetExposure = cap.coerceIn(exposureRange.lower, exposureRange.upper)
+        val scaled = (iso.toLong() * exposure / targetExposure).toInt()
+        val targetIso = scaled.coerceIn(isoRange.lower, isoRange.upper)
+        exposureLocked = true
+
+        // Off the capture callback's thread: reconfiguring the repeating request
+        // from inside a result callback deadlocks on some HALs.
+        handler?.post {
+            runCatching { applyManualExposure(targetExposure, targetIso) }
+                .onFailure { Log.w(TAG, "Could not lock exposure: ${it.message}") }
+        }
+        if (targetIso < scaled) {
+            Log.w(
+                TAG,
+                "Exposure capped at ${targetExposure / 1_000_000} ms but ISO clamped to " +
+                    "$targetIso of $scaled needed; frames will be darker than AE intended",
+            )
+        }
+    }
+
+    private fun applyManualExposure(exposureNanos: Long, iso: Int) {
+        val device = cameraDevice ?: return
+        val s = session ?: return
+        val reader = imageReader ?: return
+        val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            addTarget(reader.surface)
+            set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNanos)
+            set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+            set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
+            set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+            fixedFpsRange()?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+        }
+        s.setRepeatingRequest(builder.build(), captureCallback, handler)
+        Log.i(TAG, "Locked exposure to ${exposureNanos / 1_000_000} ms at ISO $iso")
     }
 
     private fun tryPair(timestamp: Long) {

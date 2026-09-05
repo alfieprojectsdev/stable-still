@@ -66,6 +66,24 @@ class BurstArchiveTest {
     }
 
     @Test
+    fun `a version 1 archive still reads, with no ISO rather than zero gain`() {
+        // Bursts captured before the ISO column existed must stay readable: a
+        // reader can know what an older archive meant, which is the whole reason
+        // the version check is one-sided.
+        val v1Manifest = BurstArchive.writeManifest(manifest)
+            .replace("formatVersion=${BurstArchive.FORMAT_VERSION}", "formatVersion=1")
+        assertEquals(1, BurstArchive.readManifest(v1Manifest).formatVersion)
+
+        val v1Frames = """
+            index,fileName,sensorTimestampNanos,exposureTimeNanos,rollingShutterSkewNanos,width,height
+            0,frame_00.i420,270758240298000,50000000,27406628,4080,3060
+        """.trimIndent()
+        val parsed = BurstArchive.readFrames(v1Frames).single()
+        assertEquals(27_406_628L, parsed.rollingShutterSkewNanos)
+        assertEquals(0, parsed.sensitivityIso)
+    }
+
+    @Test
     fun `a reader refuses an archive written by a newer format`() {
         val text = BurstArchive.writeManifest(manifest)
             .replace("formatVersion=${BurstArchive.FORMAT_VERSION}", "formatVersion=99")

@@ -43,6 +43,12 @@ class BurstCaptureController(private val context: Context) {
         private set
     var ringCapacity: Int = 8
         private set
+    var maxExposureNanos: Long? = null
+        private set
+
+    /** What AE actually settled on, once the cap has been applied. */
+    val exposureNanos: Long get() = engine?.appliedExposureNanos ?: 0L
+    val iso: Int get() = engine?.appliedIso ?: 0
 
     val running: Boolean get() = engine != null
     val deliveredFrames: Long get() = engine?.deliveredFrames ?: 0L
@@ -53,10 +59,11 @@ class BurstCaptureController(private val context: Context) {
     val outputRoot: File
         get() = File(context.getExternalFilesDir(null), "bursts")
 
-    suspend fun start(option: CaptureOption, ringCapacity: Int) {
+    suspend fun start(option: CaptureOption, ringCapacity: Int, maxExposureNanos: Long?) {
         stop()
         this.option = option
         this.ringCapacity = ringCapacity
+        this.maxExposureNanos = maxExposureNanos
 
         // The recorder starts first and on purpose. Its window has to already
         // extend backwards past the oldest buffered frame by the time a burst is
@@ -67,7 +74,12 @@ class BurstCaptureController(private val context: Context) {
 
         val e = CaptureEngine(context, ringCapacity)
         try {
-            e.start(preview = null, requestedSize = option.size, targetFps = option.fps)
+            e.start(
+                preview = null,
+                requestedSize = option.size,
+                targetFps = option.fps,
+                maxExposureNanos = maxExposureNanos,
+            )
             engine = e
         } catch (t: Throwable) {
             e.stop()
@@ -118,6 +130,17 @@ class BurstCaptureController(private val context: Context) {
                 notes += "Only ${frames.size} of $ringCapacity frames were buffered."
             }
             notes += "Captured at ${option.label}."
+            val exposure = frames.first().meta.exposureTimeNanos
+            maxExposureNanos?.let { cap ->
+                if (exposure > cap) {
+                    notes += "Exposure cap of ${cap / 1_000_000} ms was requested but " +
+                        "frames came back at ${exposure / 1_000_000} ms; ISO could not " +
+                        "cover the shortfall."
+                }
+            }
+            if (frames.map { it.meta.exposureTimeNanos }.distinct().size > 1) {
+                notes += "Exposure varies across the burst; the merge cannot absorb that."
+            }
 
             BurstWriter(outputRoot).write(
                 frames = frames,

@@ -104,6 +104,7 @@ class BurstWriter(private val root: File) {
                 rollingShutterSkewNanos = meta.rollingShutterSkewNanos,
                 width = meta.width,
                 height = meta.height,
+                sensitivityIso = meta.sensitivityIso,
             )
             if (meta.rollingShutterSkewNanos == 0L && i == 0) {
                 notes += "Rolling-shutter skew reported as zero; per-row correction is disabled."

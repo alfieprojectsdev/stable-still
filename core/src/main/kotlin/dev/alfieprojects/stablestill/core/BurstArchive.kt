@@ -17,10 +17,13 @@ package dev.alfieprojects.stablestill.core
 object BurstArchive {
 
     /**
-     * Bumped when a field changes meaning. A reader that does not recognise the
-     * version should refuse the archive rather than silently misread a column.
+     * Bumped when a field changes meaning.
+     *
+     * A reader accepts its own version and older ones, and refuses newer: it can
+     * know what an old archive meant, but not what a future one will. Version 2
+     * added the per-frame ISO column, which a version 1 archive simply lacks.
      */
-    const val FORMAT_VERSION = 1
+    const val FORMAT_VERSION = 2
 
     const val MANIFEST_FILE = "manifest.txt"
     const val FRAMES_FILE = "frames.csv"
@@ -42,7 +45,8 @@ object BurstArchive {
     // ------------------------------------------------------------------ frames
 
     private const val FRAMES_HEADER =
-        "index,fileName,sensorTimestampNanos,exposureTimeNanos,rollingShutterSkewNanos,width,height"
+        "index,fileName,sensorTimestampNanos,exposureTimeNanos,rollingShutterSkewNanos," +
+            "width,height,sensitivityIso"
 
     fun writeFrames(records: List<BurstFrameRecord>): String = buildString {
         appendLine(FRAMES_HEADER)
@@ -53,7 +57,8 @@ object BurstArchive {
             append(r.exposureTimeNanos).append(',')
             append(r.rollingShutterSkewNanos).append(',')
             append(r.width).append(',')
-            append(r.height).append('\n')
+            append(r.height).append(',')
+            append(r.sensitivityIso).append('\n')
         }
     }
 
@@ -68,7 +73,10 @@ object BurstArchive {
                 exposureTimeNanos = f[3].trim().toLong(),
                 rollingShutterSkewNanos = f[4].trim().toLong(),
                 width = f[5].trim().toInt(),
-                height = f[6].trim().toLong().toInt(),
+                height = f[6].trim().toInt(),
+                // Absent in version 1 archives, which is not an error - it means
+                // the burst predates the column, not that the gain was zero.
+                sensitivityIso = f.getOrNull(7)?.trim()?.toIntOrNull() ?: 0,
             )
         }
 
@@ -135,7 +143,7 @@ object BurstArchive {
         fun req(key: String): String = kv[key] ?: error("Manifest is missing '$key'")
 
         val version = req("formatVersion").toInt()
-        require(version == FORMAT_VERSION) {
+        require(version <= FORMAT_VERSION) {
             "Burst archive is format version $version, this build reads $FORMAT_VERSION"
         }
         val width = req("width").toInt()
@@ -192,6 +200,7 @@ data class BurstFrameRecord(
     val rollingShutterSkewNanos: Long,
     val width: Int,
     val height: Int,
+    val sensitivityIso: Int = 0,
 ) {
     fun toMeta(): FrameMeta = FrameMeta(
         index = index,
@@ -200,6 +209,7 @@ data class BurstFrameRecord(
         rollingShutterSkewNanos = rollingShutterSkewNanos,
         width = width,
         height = height,
+        sensitivityIso = sensitivityIso,
     )
 }
 
