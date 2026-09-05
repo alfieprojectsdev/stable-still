@@ -12,7 +12,7 @@ Verdict:
 > will have to be estimated. No OIS, as expected - software stabilisation is
 > the only option.
 
-**The design holds.** The gyro path is viable, and three of the risks this
+**The design holds.** The gyro path is viable, and four of the risks this
 document was written to hedge against turned out not to exist at all.
 
 ## Measured
@@ -56,7 +56,8 @@ gyro any more.
 | Sensor | 5.22 x 3.93 mm, focal length 3.98 mm |
 | **Focal length in pixels** | **~3110 px** at 4080 wide (~66.5 deg horizontal) |
 | Sensor orientation | 90 deg |
-| Rolling-shutter skew | **Not reported** |
+| Rolling-shutter skew | **27.4 ms** - delivered, though the probe declares otherwise |
+| Exposure in an indoor evening room | 50 ms at 20 fps, 30 ms at 30 fps |
 | Largest YUV | **4080 x 3060 (12.5 MP) at 20 fps** |
 | Fastest useful YUV | 3264 x 2448 (8 MP) at 30 fps |
 
