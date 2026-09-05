@@ -70,6 +70,45 @@ and sensor clocks share a time base. Those two answers decide whether the rest o
 the pipeline works as designed or needs its fallback path - see
 [docs/DEVICE-A07.md](docs/DEVICE-A07.md).
 
+## Working on this from Windows
+
+This repository was started from a cloud session. Moving it to a local Windows
+machine is an ordinary clone - there is no cloud-specific state in the tree.
+
+```powershell
+git clone https://github.com/alfieprojectsdev/stable-still
+cd stable-still
+```
+
+Open the folder in Android Studio. It writes `local.properties` with the SDK
+path on first sync, which is what makes `settings.gradle.kts` start including
+`:app`.
+
+**Build natively on Windows, not under WSL2.** WSL2 is the better shell, but the
+Android toolchain fights it: `adb` needs `usbipd-win` to see a USB device, the
+emulator needs nested virtualisation, and Android Studio has to run over WSLg.
+For an Android project the toolchain wins that argument.
+
+If the motivation for WSL2 was keeping a personal Claude Code login from
+colliding with a work one, that is better solved directly - `CLAUDE_CONFIG_DIR`
+relocates credentials, settings, MCP servers and history as a unit:
+
+```powershell
+# in $PROFILE
+function claude-personal {
+    $old = $env:CLAUDE_CONFIG_DIR
+    $env:CLAUDE_CONFIG_DIR = "$HOME\.claude-personal"
+    try { claude @args } finally { $env:CLAUDE_CONFIG_DIR = $old }
+}
+```
+
+Git identity is a separate axis from the Claude login, so pin it per-repository
+rather than relying on a global default:
+
+```powershell
+git config user.email "you@example.com"
+```
+
 ## Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - how the pieces fit, and the maths
