@@ -75,6 +75,40 @@ the pipeline works as designed or needs its fallback path - see
 This repository was started from a cloud session. Moving it to a local Windows
 machine is an ordinary clone - there is no cloud-specific state in the tree.
 
+### Prerequisites
+
+What you actually need is the **Android SDK**. Android Studio is simply the
+least painful way to get it, and it bundles a compatible JDK.
+
+| | |
+|---|---|
+| **Android Studio** | Stable channel, Windows 64-bit `.exe`. ~1.5 GB download, budget ~10 GB installed. |
+| **SDK Platform 35** | The project sets `compileSdk`/`targetSdk` to 35. |
+| **SDK Build-Tools** | Latest; installed by default. |
+| **SDK Platform-Tools** | Provides `adb`, which is how the app reaches the phone. |
+
+Install the last three from **Settings → Languages & Frameworks → Android SDK**.
+
+You do **not** need to install Gradle or a JDK separately. The Gradle wrapper is
+committed, and Android Studio's bundled JetBrains Runtime satisfies the JDK 17
+target this project builds against.
+
+**Skip the emulator system images.** This app reads a physical gyroscope, a real
+sensor's rolling-shutter timing, and the GPU. An emulator has none of those in
+any meaningful form - the Phase 0 probe would report a fiction. Everything gets
+tested on a real handset over USB, so those several gigabytes buy nothing here.
+
+### Phone setup (once)
+
+1. Settings → About phone → Software information → tap **Build number** 7 times.
+2. Settings → Developer options → enable **USB debugging**.
+3. Connect over USB and accept the *Allow USB debugging?* prompt on the phone.
+
+If Windows does not see the device, install the Samsung USB driver - Galaxy
+handsets sometimes need it where generic WinUSB is enough for other phones.
+
+### Clone and build
+
 ```powershell
 git clone https://github.com/alfieprojectsdev/stable-still
 cd stable-still
@@ -84,10 +118,21 @@ Open the folder in Android Studio. It writes `local.properties` with the SDK
 path on first sync, which is what makes `settings.gradle.kts` start including
 `:app`.
 
-**Build natively on Windows, not under WSL2.** WSL2 is the better shell, but the
-Android toolchain fights it: `adb` needs `usbipd-win` to see a USB device, the
-emulator needs nested virtualisation, and Android Studio has to run over WSLg.
-For an Android project the toolchain wins that argument.
+```powershell
+adb devices              # the phone should read "device", not "unauthorized"
+.\gradlew :core:test     # maths tests; needs no SDK
+.\gradlew :app:assembleDebug
+```
+
+`:core:test` passing while `:app:assembleDebug` fails is the expected first
+state - see [Status](#status).
+
+### Why not WSL2
+
+Build natively on Windows. WSL2 is the better shell, but the Android toolchain
+fights it: `adb` needs `usbipd-win` to see a USB device, the emulator needs
+nested virtualisation, and Android Studio has to run over WSLg. For an Android
+project the toolchain wins that argument.
 
 If the motivation for WSL2 was keeping a personal Claude Code login from
 colliding with a work one, that is better solved directly - `CLAUDE_CONFIG_DIR`
