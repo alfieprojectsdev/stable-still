@@ -74,6 +74,10 @@ class BurstWriter(private val root: File) {
         val started = System.currentTimeMillis()
         val notes = extraNotes.toMutableList()
 
+        // Before StatFs, not after: it rejects a path that does not exist yet,
+        // and on a first run this directory never does.
+        require(root.mkdirs() || root.isDirectory) { "Could not create $root" }
+
         val first = frames.first().meta
         val needed = BurstArchive.frameByteCount(first.width, first.height) * frames.size
         assertSpaceFor(needed)
@@ -106,6 +110,20 @@ class BurstWriter(private val root: File) {
             }
         }
 
+        val span = if (records.size < 2) 0L else
+            records.maxOf { it.sensorTimestampNanos } - records.minOf { it.sensorTimestampNanos }
+
+        // Judged before the manifest is built, not after. A warning that only
+        // reaches the return value and not the file is a warning the person
+        // reading the archive six months later never sees.
+        val covered = gyro.isNotEmpty() &&
+            gyro.first().timestampNanos <= records.minOf { it.toMeta().firstRowMidNanos } &&
+            gyro.last().timestampNanos >= records.maxOf { it.toMeta().lastRowMidNanos }
+        if (!covered) {
+            notes += "Gyro trace does not bracket every frame's exposure; " +
+                "the outermost frames will clamp instead of correcting."
+        }
+
         val manifest = BurstManifest(
             capturedAtEpochMillis = started,
             deviceModel = Build.MODEL,
@@ -128,17 +146,6 @@ class BurstWriter(private val root: File) {
         // write killed part-way leaves an archive a reader will reject outright
         // rather than one it will happily misinterpret.
         File(dir, BurstArchive.MANIFEST_FILE).writeText(BurstArchive.writeManifest(manifest))
-
-        val span = if (records.size < 2) 0L else
-            records.maxOf { it.sensorTimestampNanos } - records.minOf { it.sensorTimestampNanos }
-
-        val covered = gyro.isNotEmpty() &&
-            gyro.first().timestampNanos <= records.minOf { it.toMeta().firstRowMidNanos } &&
-            gyro.last().timestampNanos >= records.maxOf { it.toMeta().lastRowMidNanos }
-        if (!covered) {
-            notes += "Gyro trace does not bracket every frame's exposure; " +
-                "the outermost frames will clamp instead of correcting."
-        }
 
         Log.i(TAG, "Wrote ${records.size} frames (${bytes / (1024 * 1024)} MB) to $dir")
         return SavedBurst(

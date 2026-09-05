@@ -96,11 +96,26 @@ here under "expect `LIMITED`" mostly do not apply:
   exposure instead of relying on the weighted merge to absorb variation.
 - **`SENSOR_TIMESTAMP` is dependable**, which `LEGACY` would have denied.
 
-### 4. Rolling-shutter skew must be estimated
+### 4. Rolling-shutter skew *is* delivered, despite the probe saying otherwise
 
-`SENSOR_ROLLING_SHUTTER_SKEW` is absent. `FrameMeta` defaults it to zero, which
-degrades per-row correction without breaking alignment, so this is Phase 4
-estimation work rather than a blocker.
+The probe reports `reportsRollingShutterSkew: false`, and that is a **false
+negative**. It tests `availableCaptureResultKeys` for
+`SENSOR_ROLLING_SHUTTER_SKEW`, which is a question about what the HAL
+*declares*. This HAL under-declares: every `CaptureResult` from a real burst
+carries the key regardless.
+
+Measured across saved bursts: **27,406,628 ns - 27.4 ms** of skew, constant
+across frames and identical at both 4080x3060 and 3264x2448.
+
+That is not a small number. The last row of a frame starts exposing 27 ms after
+the first, which at a hand-tremor rate of 0.2 rad/s is about 5.5 mrad of
+rotation *within* one frame, or ~17 px at f ~ 3110. Per-row correction is
+therefore worth doing rather than optional, and it can be driven from a measured
+value instead of an estimated one. Phase 4 loses another component.
+
+The probe's check is still the right question to ask - a device that declares
+the key is guaranteed to deliver it - it just cannot prove absence. Treat a
+`false` here as "unknown, look at a real CaptureResult" rather than "no".
 
 ### 5. The zero-rate offset is negligible, so no bias calibration is needed
 
@@ -129,7 +144,7 @@ would not be this good. Two consequences worth remembering:
 
 ## Open risks
 
-These replace the pre-probe assumption table. All three are consequences of
+These replace the pre-probe assumption table. All are consequences of
 measurement, not speculation.
 
 ### The 50 MP frame does not exist on the YUV path
@@ -153,6 +168,31 @@ frames is **214 MB of native ImageReader buffers on a 3.4 GB phone**. That is
 the allocation-failure and thermal risk this section was always about, and the
 heuristic as written does not address it. Decide the default depth from a
 measured burst rather than from this formula.
+
+### Exposure expands to fill the frame period, and blur is unrecoverable
+
+Pinning `CONTROL_AE_TARGET_FPS_RANGE` stops the frame rate drifting, but it does
+not stop AE spending the whole frame period on one exposure. Measured in an
+ordinary indoor evening room:
+
+| Setting | Exposure | Frame period |
+|---|---|---|
+| 12.5 MP at 20 fps | **50.0 ms** | 50.1 ms |
+| 8 MP at 30 fps | **30.0 ms** | 33.4 ms |
+
+The design is written around a 20 ms exposure. At 50 ms every frame carries
+two and a half times that much motion blur, and the anchor's own blur is baked
+into the output - no amount of alignment removes it. Stacking trades noise for
+sharpness, so an exposure this long spends the thing the stack is meant to buy.
+
+The device is `LEVEL_3` with `supportsManualSensor`, so exposure can be capped
+explicitly and the shortfall taken as gain instead. That is the right lever, and
+it should be pulled before any burst is used to judge alignment quality.
+
+Related: the archive does not record `SENSOR_SENSITIVITY`. Two bursts of the
+same scene came back at visibly different brightness with identical exposure
+times, which can only have been ISO, and without it a stack cannot normalise
+between frames or explain the difference.
 
 ### Full resolution costs frame rate, and frame rate costs alignment
 

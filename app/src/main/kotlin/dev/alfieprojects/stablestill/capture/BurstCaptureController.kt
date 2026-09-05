@@ -1,6 +1,7 @@
 package dev.alfieprojects.stablestill.capture
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Size
 import dev.alfieprojects.stablestill.motion.GyroRecorder
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +95,14 @@ class BurstCaptureController(private val context: Context) {
         val e = engine ?: error("Capture is not running")
         val r = recorder ?: error("Capture is not running")
 
-        val shutterNanos = System.nanoTime()
+        // elapsedRealtimeNanos, never System.nanoTime(). The camera's
+        // SENSOR_TIMESTAMP source is REALTIME, which is CLOCK_BOOTTIME and counts
+        // through suspend; nanoTime is CLOCK_MONOTONIC and does not. On a phone
+        // that has been asleep the two are days apart - measured at 37 hours on
+        // this handset - so a shutter time taken from the wrong clock lands
+        // outside the ring buffer entirely and silently anchors the burst to its
+        // oldest frames.
+        val shutterNanos = SystemClock.elapsedRealtimeNanos()
         val frames = e.takeBurst(ringCapacity, shutterNanos)
         check(frames.isNotEmpty()) {
             "The ring buffer is empty. Give the camera a moment to fill it."
