@@ -1,0 +1,228 @@
+{
+  "model": "SM-A076B",
+  "device": "samsung a07x",
+  "androidRelease": "16",
+  "sdkInt": 36,
+  "totalRamMb": 3480,
+  "glEsVersion": "3.2",
+  "verdict": "Gyro pipeline fully supported (403 Hz). Camera and sensor clocks are shared, so no sync calibration is needed. Rolling-shutter skew is not reported; it will have to be estimated. No OIS, as expected - software stabilisation is the only option.",
+  "accelerometerPresent": true,
+  "gravitySensorPresent": true,
+  "gyro": {
+    "present": true,
+    "name": "bmi3xy gyro",
+    "vendor": "bosch",
+    "grade": "HARDWARE_FAST",
+    "measuredRateHz": 402.67199719511996,
+    "intervalJitterFraction": 2.0331273933900925E-5,
+    "restNoiseRadPerSec": 0.0016485047078037736,
+    "resolutionRadPerSec": 0.0010999999940395355,
+    "maxRangeRadPerSec": 34.90629959106445,
+    "reportedMinDelayMicros": 2500,
+    "sampleCount": 588,
+    "notes": []
+  },
+  "cameras": [
+    {
+      "cameraId": "0",
+      "hardwareLevel": "LEVEL_3",
+      "timestampSource": "REALTIME",
+      "clockRelationship": "SHARED_REALTIME",
+      "sensorOrientationDegrees": 90,
+      "physicalSizeMm": "5.22x3.93",
+      "focalLengthsMm": [
+        3.9800000190734863
+      ],
+      "hasOpticalStabilisation": false,
+      "supportsManualSensor": true,
+      "supportsRaw": true,
+      "reportsRollingShutterSkew": false,
+      "yuvSizes": [
+        {
+          "width": 4080,
+          "height": 3060,
+          "maxFps": 20
+        },
+        {
+          "width": 4080,
+          "height": 2296,
+          "maxFps": 20
+        },
+        {
+          "width": 3056,
+          "height": 3056,
+          "maxFps": 20
+        },
+        {
+          "width": 3264,
+          "height": 2448,
+          "maxFps": 30
+        },
+        {
+          "width": 4080,
+          "height": 1836,
+          "maxFps": 20
+        },
+        {
+          "width": 2560,
+          "height": 1920,
+          "maxFps": 30
+        },
+        {
+          "width": 2560,
+          "height": 1440,
+          "maxFps": 30
+        },
+        {
+          "width": 1920,
+          "height": 1440,
+          "maxFps": 30
+        },
+        {
+          "width": 2400,
+          "height": 1080,
+          "maxFps": 30
+        },
+        {
+          "width": 1920,
+          "height": 1088,
+          "maxFps": 30
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "maxFps": 30
+        },
+        {
+          "width": 1440,
+          "height": 1088,
+          "maxFps": 30
+        },
+        {
+          "width": 1440,
+          "height": 1080,
+          "maxFps": 30
+        },
+        {
+          "width": 1280,
+          "height": 960,
+          "maxFps": 30
+        },
+        {
+          "width": 1600,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 1560,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 1520,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 1440,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 1280,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 1080,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 960,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 720,
+          "height": 720,
+          "maxFps": 30
+        },
+        {
+          "width": 640,
+          "height": 640,
+          "maxFps": 30
+        },
+        {
+          "width": 720,
+          "height": 480,
+          "maxFps": 30
+        },
+        {
+          "width": 640,
+          "height": 480,
+          "maxFps": 30
+        },
+        {
+          "width": 640,
+          "height": 360,
+          "maxFps": 30
+        },
+        {
+          "width": 640,
+          "height": 288,
+          "maxFps": 30
+        },
+        {
+          "width": 352,
+          "height": 288,
+          "maxFps": 30
+        },
+        {
+          "width": 320,
+          "height": 240,
+          "maxFps": 30
+        },
+        {
+          "width": 320,
+          "height": 144,
+          "maxFps": 30
+        },
+        {
+          "width": 192,
+          "height": 192,
+          "maxFps": 30
+        },
+        {
+          "width": 192,
+          "height": 144,
+          "maxFps": 30
+        },
+        {
+          "width": 176,
+          "height": 144,
+          "maxFps": 30
+        },
+        {
+          "width": 192,
+          "height": 108,
+          "maxFps": 30
+        },
+        {
+          "width": 160,
+          "height": 96,
+          "maxFps": 30
+        }
+      ],
+      "aeFpsRanges": [
+        "10-10",
+        "15-15",
+        "15-20",
+        "20-20",
+        "24-24",
+        "5-30",
+        "30-30"
+      ]
+    }
+  ]
+}
