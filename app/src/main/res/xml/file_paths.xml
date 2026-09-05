@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Probe reports and stacked stills live under the app's external files dir,
+         which needs no runtime permission and is cleaned up on uninstall. -->
+    <external-files-path name="probe" path="probe/" />
+    <external-files-path name="captures" path="captures/" />
+</paths>
