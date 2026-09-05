@@ -195,7 +195,7 @@ private fun ReportBody(r: DeviceProbeReport) {
 }
 
 @Composable
-private fun Field(label: String, value: String) {
+internal fun Field(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodySmall)
         Text(value, style = MaterialTheme.typography.bodySmall)

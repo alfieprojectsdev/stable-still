@@ -51,6 +51,8 @@ class CaptureEngine(
 
     val ringBuffer = FrameRingBuffer(ringCapacity)
 
+    private var cameraCharacteristics: CameraCharacteristics? = null
+    private var targetFps: Int? = null
     private var cameraDevice: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
@@ -73,10 +75,12 @@ class CaptureEngine(
         private set
 
     @SuppressLint("MissingPermission")
-    suspend fun start(preview: Surface?, requestedSize: Size) {
+    suspend fun start(preview: Surface?, requestedSize: Size, targetFps: Int? = null) {
         val id = selectBackCamera() ?: error("No back-facing camera available")
         cameraId = id
         val characteristics = cameraManager.getCameraCharacteristics(id)
+        cameraCharacteristics = characteristics
+        this.targetFps = targetFps
 
         val t = HandlerThread("capture-engine").apply { start() }
         thread = t
@@ -123,8 +127,29 @@ class CaptureEngine(
             // invents detail per frame that then fails to average away.
             set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
             set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+            // Pin the frame rate if the HAL offers a fixed range. Left to its own
+            // devices, AE widens the exposure in dim light and drops the rate to
+            // the bottom of a range like 5-30, which stretches the burst window
+            // without saying so - the burst still looks fine, it just spans four
+            // times as much hand motion as intended.
+            fixedFpsRange()?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
         }
         s.setRepeatingRequest(builder.build(), captureCallback, handler)
+    }
+
+    /**
+     * The `[fps, fps]` range if the device advertises it, otherwise null.
+     *
+     * Only an exact fixed range is accepted. Asking for `[20, 20]` when the HAL
+     * lists `[5, 30]` is rejected outright by some devices and silently ignored
+     * by others, and a request that is ignored is worse than one not made.
+     */
+    private fun fixedFpsRange(): android.util.Range<Int>? {
+        val fps = targetFps ?: return null
+        val available = cameraCharacteristics
+            ?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?: return null
+        return available.firstOrNull { it.lower == fps && it.upper == fps }
     }
 
     private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
