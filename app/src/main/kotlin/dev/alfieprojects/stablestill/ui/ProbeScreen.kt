@@ -148,6 +148,7 @@ private fun ReportBody(r: DeviceProbeReport) {
                 Field("Measured rate", "%.1f Hz".format(r.gyro.measuredRateHz))
                 Field("Interval jitter", "%.1f%%".format(r.gyro.intervalJitterFraction * 100))
                 Field("Rest noise", "%.5f rad/s".format(r.gyro.restNoiseRadPerSec))
+                Field("Zero-rate offset", "%.5f rad/s".format(r.gyro.restBiasRadPerSec))
                 Field("Resolution", "%.6f rad/s".format(r.gyro.resolutionRadPerSec))
                 Field("Samples", "${r.gyro.sampleCount}")
             }

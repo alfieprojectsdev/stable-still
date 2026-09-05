@@ -13,9 +13,15 @@
     "name": "bmi3xy gyro",
     "vendor": "bosch",
     "grade": "HARDWARE_FAST",
-    "measuredRateHz": 402.67199719511996,
-    "intervalJitterFraction": 2.0331273933900925E-5,
-    "restNoiseRadPerSec": 0.0016485047078037736,
+    "measuredRateHz": 402.67847065850464,
+    "intervalJitterFraction": 1.798917669526394E-5,
+    "restNoiseRadPerSec": 0.002648586353171961,
+    "restBiasRadPerSec": 1.2617977197510897E-4,
+    "restBiasAxesRadPerSec": [
+      -1.1388180368788996E-4,
+      7.71683590093843E-6,
+      -5.37840133140079E-5
+    ],
     "resolutionRadPerSec": 0.0010999999940395355,
     "maxRangeRadPerSec": 34.90629959106445,
     "reportedMinDelayMicros": 2500,

@@ -12,8 +12,8 @@ Verdict:
 > will have to be estimated. No OIS, as expected - software stabilisation is
 > the only option.
 
-**The design holds.** The gyro path is viable, and two of the risks this
-document was written to hedge against turned out not to exist.
+**The design holds.** The gyro path is viable, and three of the risks this
+document was written to hedge against turned out not to exist at all.
 
 ## Measured
 
@@ -33,11 +33,16 @@ document was written to hedge against turned out not to exist.
 | Property | Value | Reading |
 |---|---|---|
 | Delivered rate | 402.7 Hz | 100.7% of the 400 Hz advertised - no throttling |
-| Interval jitter | 0.002% | ~51 ns on a 2.5 ms interval: timestamps are sensor-side |
-| Noise at rest | 0.00165 rad/s | 1.5x the resolution, so quantisation-limited |
+| Interval jitter | 0.002% | ~45 ns on a 2.5 ms interval: timestamps are sensor-side |
+| Noise at rest | 0.0026 rad/s | 2.4x the resolution, so quantisation-limited |
+| **Zero-rate offset** | **0.00013 rad/s** | 0.007 deg/s - negligible; see below |
 | Resolution | 0.0011 rad/s | |
 | Full scale | 34.9 rad/s | 2000 deg/s |
 | Probe notes | *(none)* | No tell for a fused sensor fired |
+
+Two runs an hour apart agreed on rate and jitter to three figures. The noise
+floor moved between them (0.0016 and 0.0026 rad/s) with the resting surface,
+which is what a quantisation-limited figure at this scale should do.
 
 This is a real MEMS part and not the accelerometer/magnetometer blend that the
 A05 and A06 shipped. Nothing in the design needs to be defended against a fused
@@ -65,9 +70,8 @@ multi-frame optical stacker - is not needed. It stays on the shelf rather than
 in the roadmap.
 
 For scale: at f ~ 3110 px, the measured noise integrated across a 20 ms exposure
-is under 0.1 px of misalignment, and even integrated across a whole 550 ms burst
-it reaches only ~0.13 px. Gyro *noise* is nowhere near the limiting factor.
-Gyro *bias* is a different matter - see the open risks below.
+is under 0.1 px of misalignment, and across a whole 550 ms burst it reaches only
+~0.3 px. Gyro noise is nowhere near the limiting factor.
 
 ### 2. The clocks are shared, so sync calibration is a no-op
 
@@ -98,9 +102,34 @@ here under "expect `LIMITED`" mostly do not apply:
 degrades per-row correction without breaking alignment, so this is Phase 4
 estimation work rather than a blocker.
 
+### 5. The zero-rate offset is negligible, so no bias calibration is needed
+
+This was written up as the risk that would dominate alignment, on the reasoning
+that noise averages down over a burst while a constant offset integrates into
+drift. The reasoning is sound; the offset simply is not there.
+
+Measured: **0.00013 rad/s** (0.007 deg/s), per-axis
+`[-1.14e-4, 7.7e-6, -5.4e-5]`. Over the 550 ms of a full burst that integrates
+to 0.07 mrad, or **0.2 px** at this camera's focal length - below the noise
+contribution and far below the threshold at which the probe bothers to mention
+it.
+
+The likely explanation is that `TYPE_GYROSCOPE` is already bias-compensated:
+the HAL exposes a separate `uncali_gyro`, and Android's calibrated gyroscope
+subtracts a continuously-maintained offset estimate from it. A raw MEMS part
+would not be this good. Two consequences worth remembering:
+
+- Do not add a bias-estimation step to Phase 1. There is nothing to remove, and
+  a redundant estimator fitted to noise would inject error rather than take it
+  out.
+- The platform's offset estimate can be revised mid-session, which appears as a
+  small step rather than a drift. At this magnitude it is not worth defending
+  against, but it is the reason to re-run the probe rather than treat one
+  measurement as permanent if unexplained drift ever does show up.
+
 ## Open risks
 
-These replace the pre-probe assumption table. All four are consequences of
+These replace the pre-probe assumption table. All three are consequences of
 measurement, not speculation.
 
 ### The 50 MP frame does not exist on the YUV path
@@ -134,20 +163,6 @@ excursion to correct, and a correspondingly larger crop budget.
 Dropping to 3264 x 2448 (8 MP) restores 30 fps. This is a genuine trade between
 resolution and alignment quality, and it should be settled against a saved
 burst, not by argument.
-
-### Gyro bias is unmeasured, and it dominates
-
-`restNoiseRadPerSec` is the standard deviation of the rate magnitude *about its
-own mean*, so it deliberately excludes the zero-rate offset. `meanMag` is
-computed inside `DeviceProbe` but never reaches the report.
-
-Over a 550 ms burst, bias is the error that matters. Noise contributes ~0.13 px.
-A 0.1 deg/s offset - unremarkable for an uncalibrated consumer MEMS part -
-integrates to ~1.5 px across the +/-275 ms either side of the anchor, and
-1 deg/s gives ~15 px. The one gyro property that will actually limit alignment
-is the one the report does not carry. Emitting `meanMag` while the phone is
-already sitting still is a cheap fix and should happen before Phase 1 depends
-on it.
 
 ## Published specification, for the record
 

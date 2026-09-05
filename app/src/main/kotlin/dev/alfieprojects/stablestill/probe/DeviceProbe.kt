@@ -73,6 +73,8 @@ class DeviceProbe(private val context: Context) {
                 measuredRateHz = 0.0,
                 intervalJitterFraction = 0.0,
                 restNoiseRadPerSec = 0.0,
+                restBiasRadPerSec = 0.0,
+                restBiasAxesRadPerSec = listOf(0.0, 0.0, 0.0),
                 sampleCount = 0,
                 grade = GyroGrade.ABSENT,
                 notes = listOf("TYPE_GYROSCOPE is not available on this device."),
@@ -80,6 +82,14 @@ class DeviceProbe(private val context: Context) {
 
         val timestamps = ArrayList<Long>(1024)
         val magnitudes = ArrayList<Double>(1024)
+
+        // Running per-axis sums, because the quantity that actually limits
+        // alignment is the mean *vector* and the magnitudes cannot recover it:
+        // |w| is non-negative, so averaging it folds noise into the result and
+        // reports an offset even for a perfectly unbiased sensor at rest.
+        var sumX = 0.0
+        var sumY = 0.0
+        var sumZ = 0.0
 
         val thread = HandlerThread("probe-gyro").apply { start() }
         try {
@@ -92,6 +102,9 @@ class DeviceProbe(private val context: Context) {
                         val y = event.values[1].toDouble()
                         val z = event.values[2].toDouble()
                         magnitudes += sqrt(x * x + y * y + z * z)
+                        sumX += x
+                        sumY += y
+                        sumZ += z
                     }
 
                     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -136,6 +149,17 @@ class DeviceProbe(private val context: Context) {
             0.0
         }
 
+        // Zero-rate offset. Noise averages away over a burst; this does not - it
+        // integrates straight into drift, so it is the figure that decides how
+        // far alignment can be trusted across a 550 ms window.
+        val sampleCount = magnitudes.size
+        val biasAxes = if (sampleCount > 0) {
+            listOf(sumX / sampleCount, sumY / sampleCount, sumZ / sampleCount)
+        } else {
+            listOf(0.0, 0.0, 0.0)
+        }
+        val bias = sqrt(biasAxes.sumOf { it * it })
+
         val advertisedHz = if (sensor.minDelay > 0) 1_000_000.0 / sensor.minDelay else 0.0
         if (advertisedHz > 0 && rateHz < advertisedHz * 0.6) {
             notes += "Delivering %.0f Hz against an advertised %.0f Hz.".format(rateHz, advertisedHz)
@@ -153,7 +177,15 @@ class DeviceProbe(private val context: Context) {
             notes += "Sensor name/vendor suggests a software-derived gyroscope."
         }
         if (meanMag > 0.2) {
-            notes += "Device was moving during the probe; the noise figure is not a rest measurement."
+            notes += "Device was moving during the probe; neither the noise floor nor the " +
+                "zero-rate offset is a rest measurement."
+        } else if (bias > 0.001) {
+            // 0.001 rad/s integrates to 0.25 mrad over the 250 ms between an anchor
+            // and the end of a burst, which is about a pixel at this camera's focal
+            // length. Below that the offset is not worth mentioning.
+            notes += "Zero-rate offset is %.4f rad/s, drifting %.2f mrad over 250 ms. ".format(
+                bias, bias * 0.25 * 1000
+            ) + "Subtract it before integrating the track."
         }
 
         val grade = when {
@@ -177,6 +209,8 @@ class DeviceProbe(private val context: Context) {
             measuredRateHz = rateHz,
             intervalJitterFraction = jitter,
             restNoiseRadPerSec = noise,
+            restBiasRadPerSec = bias,
+            restBiasAxesRadPerSec = biasAxes,
             sampleCount = timestamps.size,
             grade = grade,
             notes = notes,

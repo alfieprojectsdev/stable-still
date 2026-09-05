@@ -57,8 +57,19 @@ data class GyroProbe(
     val measuredRateHz: Double,
     /** Standard deviation of the interval between samples, as a fraction of the mean. */
     val intervalJitterFraction: Double,
-    /** Noise floor while (hopefully) at rest, rad/s. */
+    /** Noise floor while (hopefully) at rest, rad/s. Excludes the offset below. */
     val restNoiseRadPerSec: Double,
+    /**
+     * Zero-rate offset at rest, rad/s: the magnitude of the mean rate vector.
+     *
+     * This, not the noise floor, is what limits alignment over a burst. Noise is
+     * zero-mean and averages down; a constant offset integrates into drift that
+     * grows with the window, so a figure the noise measurement deliberately
+     * subtracts is the one that costs pixels.
+     */
+    val restBiasRadPerSec: Double,
+    /** The same offset per axis, which is what a calibration step would subtract. */
+    val restBiasAxesRadPerSec: List<Double>,
     val sampleCount: Int,
     val grade: GyroGrade,
     val notes: List<String>,
@@ -167,6 +178,8 @@ data class DeviceProbeReport(
             put("measuredRateHz", gyro.measuredRateHz)
             put("intervalJitterFraction", gyro.intervalJitterFraction)
             put("restNoiseRadPerSec", gyro.restNoiseRadPerSec)
+            put("restBiasRadPerSec", gyro.restBiasRadPerSec)
+            put("restBiasAxesRadPerSec", JSONArray(gyro.restBiasAxesRadPerSec))
             put("resolutionRadPerSec", gyro.resolutionRadPerSec.toDouble())
             put("maxRangeRadPerSec", gyro.maxRangeRadPerSec.toDouble())
             put("reportedMinDelayMicros", gyro.reportedMinDelayMicros)
