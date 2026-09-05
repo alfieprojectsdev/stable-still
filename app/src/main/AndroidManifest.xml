@@ -2,6 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <!--
+      Android 12 gates sensor sampling above 200 Hz behind this permission, and
+      the probe registers at SENSOR_DELAY_FASTEST. Without it registerListener
+      throws rather than quietly capping, so the probe cannot run at all. It is
+      a normal permission: granted at install, with no runtime prompt.
+    -->
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
 
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <!--
