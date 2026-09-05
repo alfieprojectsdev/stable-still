@@ -1,9 +1,9 @@
 # Handover
 
-Written at the end of the cloud session that created this project, for the
-local session that picks it up. If you arrived by `claude --teleport` you
-already have the full conversation and can skim this; if you started cold, this
-is the context you are missing.
+The current state and the next action. `docs/SESSION-LOG.md` records how it got
+here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
+
+Updated 5 September 2026, at the end of the first local session.
 
 ---
 
@@ -11,36 +11,64 @@ is the context you are missing.
 
 | Phase | What | State |
 |---|---|---|
-| 0 | Device probe | Written. **Never run.** |
-| 1 | Ring-buffer capture + gyro recording | Written. **Never run.** |
-| 2 | Motion maths | **38 unit tests passing.** |
+| 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
+| 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved to disk.** |
+| 2 | Motion maths | **46 unit tests passing.** |
 | 3 | GPU warp + merge | Written. **Never run.** |
-| 4 | Sync calibration + optical refinement | Designed only. Not written. |
+| 4 | Sync calibration + optical refinement | Mostly deleted by measurement; see below. |
 | 5 | Product UX | Not started. |
 
-**The `:app` module has never been compiled by anything.** It was authored in a
-container with no Android SDK, so it has not even been syntax-checked by a
-Kotlin compiler that understands Android types. Expect errors on first sync.
-That is anticipated, not a regression - do not treat a broken build as evidence
-that something has gone wrong since.
+`:app` now builds and runs on the A07. The warning that it had never been
+compiled no longer applies - it compiled on the first real attempt, with no
+Kotlin errors.
 
-`:core` is different: it compiles and its tests pass.
+**Build requirement:** `JAVA_HOME` must point at **Temurin 21**, not Android
+Studio's bundled JBR 25. Gradle 8.14.3 cannot compile the build scripts on
+Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ---
 
 ## Do this first
 
-**Run the Phase 0 probe on the A07 and read the verdict.** Nothing else is
-worth doing before that.
+**Confirm the exposure cap works, then re-shoot a burst in daylight.**
 
-The probe answers whether the phone's gyroscope is real hardware or a low-rate
-software fusion. Budget Samsung A-series handsets have a history of listing a
-"gyroscope" that is really an accelerometer/magnetometer blend at ~50 Hz -
-useless for aligning a 20 ms exposure. The published listings for this device
-claim a gyro, but they also disagree with each other about the chipset, so they
-are not evidence.
+Everything captured so far was shot in a dark room at 50 ms exposure. Those
+bursts prove the archive format and nothing else: too dark to align against,
+too blurred to judge. The cap is implemented and installed but has never run.
 
-The verdict decides the project's shape:
+On the phone: **Capture** tab, resolution **12.5 MP**, depth **8**, max
+exposure **20 ms**, **Start camera**, wait for 8/8, hold it, **Save burst**.
+Check that the reported exposure is 20 ms rather than 50, and that ISO rose to
+compensate. `adb shell input tap` does not work on this handset, so this needs
+a finger.
+
+Then the same in good light, at both resolutions, which is what settles the
+20-vs-30 fps question `docs/DEVICE-A07.md` leaves open.
+
+---
+
+## After that
+
+1. **Read an archive back.** Nothing does yet. A JVM test in `:core` that loads
+   a saved burst, integrates its gyro trace and solves the alignment is the
+   step that turns every later bug into a desk problem. The format and its
+   round-trip tests are already there; the reader is not.
+2. **Then** the GPU path, which has still never run.
+
+---
+
+## What Phase 0 settled, in one paragraph
+
+The gyro is a real Bosch BMI3xx at 403 Hz with sensor-side timestamps and a
+negligible zero-rate offset; the camera is `LEVEL_3` with RAW and manual
+sensor; camera and sensor clocks are shared, so sync calibration solves for
+zero; rolling-shutter skew is delivered at 27.4 ms despite the probe declaring
+otherwise. Phase 4 loses sync calibration and skew estimation, keeping only rig
+handedness and optical refinement. The full detail, including four things
+measurement made *worse*, is in `docs/DEVICE-A07.md`.
+
+The original decision tree below is kept because it records why the probe was
+built, and because it is the fallback if a second device grades differently:
 
 - **`HARDWARE_FAST` / `HARDWARE_ADEQUATE`** - proceed as designed.
 - **`MARGINAL`** - the gyro seeds an optical refiner rather than driving the warp.
@@ -48,22 +76,6 @@ The verdict decides the project's shape:
   stacker, roughly what Google's HDR+ does. Still a real and useful app. None
   of the capture, merge, or crop work is wasted; only the source of the
   homography changes.
-
-Getting there means: fix whatever `:app:assembleDebug` throws, install to the
-phone, rest it on a table, tap **Run probe**, export the JSON.
-
----
-
-## After the probe
-
-In this order, because each step makes the next one debuggable:
-
-1. **Save a burst to disk** - frames plus the gyro trace as CSV - and copy it
-   to the laptop. This is the highest-value hour in the whole project: it turns
-   every later alignment bug into something reproducible offline instead of a
-   thing that only happens on a phone in your hand.
-2. **Stack that saved burst in a JVM test** before trusting the GPU path.
-3. **Then** Phase 4 (sync calibration, rig handedness, optical refinement).
 
 ---
 
@@ -89,9 +101,13 @@ the output and cannot be removed by any amount of alignment.
 its agreement with the anchor, so static regions get noise reduction while
 moving subjects fall back to the anchor alone instead of ghosting.
 
-**Stack depth comes from measured RAM.** A 50 MP YUV_420_888 frame is 75 MB.
-The ten-frame buffer this design started from would be 750 MB on a 4 GB phone.
-`recommendedStackDepth()` budgets a quarter of RAM and clamps to 3-12.
+**Stack depth comes from measured RAM** - and on this device that turned out to
+decide nothing. The reasoning assumed a 75 MB 50 MP frame, but the largest
+`YUV_420_888` output is 12.5 MP at 17.9 MB, so `recommendedStackDepth()`
+returns its clamp of 12 for every size this camera offers. The budget never
+binds. What that leaves ungoverned is 214 MB of native ImageReader buffers on a
+3.4 GB phone, which is the risk the heuristic was written to address and does
+not. Decide the default from a measured burst instead.
 
 **`main` began as an empty root commit.** GitHub refuses a pull request between
 branches with no common ancestor, so that root was merged into the feature
@@ -106,10 +122,11 @@ history makes sense.
 |---|---|
 | Local clone | `C:\Users\admin\repos\stable-still` |
 | Android SDK | `C:\Users\admin\AppData\Local\Android\Sdk` |
-| Android Studio | Quail 4 |
-| Needed platform | **API 35** (Android 15, "VanillaIceCream") |
-| Also installed | API 37 - harmless, but see below |
-| Device | Galaxy A07 5G, Android 15 |
+| Android Studio | Quail 4 - but its bundled JBR 25 cannot run this Gradle |
+| **JDK for Gradle** | **Temurin 21** at `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot` |
+| Installed platform | API 35 only; build-tools 34 and 36 |
+| Device | Galaxy A07 5G, **Android 16 / API 36** - the listings saying 15 are wrong |
+| Debugging | Wireless (`adb pair`, then mDNS). Synthetic input is blocked. |
 
 `compileSdk`/`targetSdk` are 35 because AGP 8.7.3 caps there. To move to API 37,
 bump AGP in `gradle/libs.versions.toml` **first**, then `compileSdk`. Doing it

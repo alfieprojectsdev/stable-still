@@ -1,0 +1,111 @@
+# Session log
+
+Newest first. One entry per working session: what changed, what was measured,
+and what the next session should not have to rediscover.
+
+`docs/HANDOVER.md` carries the *current* state and the next action.
+This file carries how it got there.
+
+---
+
+## 2026-09-05 - Phase 0 run, Phase 1 started
+
+First local session. The project arrived from a cloud session with `:core`
+tested and `:app` never compiled by anything.
+
+### Environment, settled once
+
+- **`JAVA_HOME` must be Temurin 21.** Android Studio Quail bundles JBR **25**,
+  and Gradle 8.14.3's embedded Kotlin script compiler throws
+  `IllegalArgumentException: 25.0.3` parsing that version - it cannot compile
+  `build.gradle.kts` at all, so even `:core:test` fails. Installed to
+  `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`. Not written into
+  `gradle.properties` because that file is committed and the path is not
+  portable.
+- `local.properties` needs forward slashes. Backslashes are eaten by Java's
+  properties parser and surface as `IOException: The filename, directory name,
+  or volume label syntax is incorrect`, which names nothing useful.
+- **Wireless debugging works and is worth using.** `adb pair`, then mDNS
+  auto-connects. A USB cable tugs at the phone during capture, and hand tremor
+  is the signal being measured.
+- **Synthetic input is blocked on this handset.** `adb shell input tap` returns
+  cleanly and does nothing, so on-device UI steps need a human finger. Reading
+  the screen (`screencap` + `pull`) and pulling files both work fine.
+
+### Two build fixes
+
+`:app` compiled on the first real attempt - no Kotlin errors - contrary to the
+handover's warning. Both failures were environmental:
+
+- `settings.gradle.kts` filtered the Google repo to `com.android.*`,
+  `androidx.*` and `com.google.android.*`, but AGP 8.7.3 needs
+  `com.google.testing.platform:core-proto` on its own plugin classpath.
+- The probe could not register the gyroscope at all without
+  `HIGH_SAMPLING_RATE_SENSORS`: Android 12 gates rates above 200 Hz behind it,
+  and an undeclared request throws rather than being capped.
+
+### Phase 0: `HARDWARE_FAST`
+
+Report committed as `docs/probe-SM-A076B.json`. Details in
+`docs/DEVICE-A07.md`; the short version is that the highest-risk assumption
+held and several hedges turned out unnecessary.
+
+Four things measurement changed, two in each direction:
+
+| Was assumed | Measured |
+|---|---|
+| Gyro possibly fused at ~50 Hz | Real Bosch BMI3xx at **403 Hz** |
+| Clock offset needs calibration | `SHARED_REALTIME` - solves for zero |
+| Camera2 `LIMITED` | **`LEVEL_3`** - RAW and manual sensor available |
+| Bias would dominate alignment | **0.00013 rad/s** - 0.2 px over a burst |
+
+The bias result is why `meanMag` was *not* what got reported. Mean magnitude is
+non-negative, so it folds noise in and returns roughly `sqrt(b^2 + 3*sigma^2)`:
+at this noise floor it would have read ~0.003 rad/s for a perfectly unbiased
+sensor and sent Phase 1 chasing a calibration ghost. The mean *vector* is the
+quantity that integrates into drift, and recovering it needed per-axis sums the
+probe had been discarding.
+
+### Phase 1: burst-to-disk
+
+The archive format lives in `:core` because its entire purpose is to be read
+off the phone. `:app` holds only the part that needs hardware - getting bytes
+out of an `Image`.
+
+Five bursts captured, two pulled. Every frame byte-exact against
+`frameByteCount`, and both resolutions decode to coherent images, so the
+`YUV_420_888` stride handling is confirmed against this HAL rather than merely
+careful.
+
+Bugs the real bursts exposed, both since fixed:
+
+- **Shutter time came from `System.nanoTime()`** - `CLOCK_MONOTONIC` - while
+  camera timestamps are `REALTIME`/`CLOCK_BOOTTIME`. The phone had been asleep
+  37 hours, putting the clocks **134,000 seconds** apart, so every shutter time
+  landed outside the ring buffer and the burst silently anchored on its oldest
+  frames. Invisible only because burst size equalled ring capacity.
+- The gyro-coverage warning was computed after the manifest was written, so it
+  reached the UI and never the archive.
+
+### What the bursts revealed about the hardware
+
+- **Rolling-shutter skew is delivered at 27.4 ms**, though the probe reports
+  otherwise. The probe asks `availableCaptureResultKeys`, which is what the HAL
+  *declares*; this one under-declares. 27 ms is ~17 px of intra-frame rotation
+  at a typical tremor rate, so per-row correction is worth doing and can use a
+  measured value.
+- **Exposure expands to fill the frame period** - 50 ms at 20 fps, 30 ms at
+  30 fps, against a design assuming 20 ms. Addressed by capping exposure and
+  taking the shortfall as gain, with AE left to do the metering.
+
+### Left open
+
+- The exposure cap is **implemented and installed but not confirmed on
+  hardware**. It needs one capture with the cap set to 20 ms.
+- The five captured bursts are **too dark and too blurred to judge alignment**.
+  They prove the format, nothing more. Re-shoot in daylight with the cap on.
+- **Nothing reads an archive back yet.** The handover's step 2 - stack a saved
+  burst in a JVM test - is untouched.
+- `recommendedStackDepth()` returns 12 for every size this camera offers; the
+  clamp binds, never the RAM budget. 214 MB of native buffers on a 3.4 GB phone
+  is ungoverned.
