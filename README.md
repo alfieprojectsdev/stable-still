@@ -156,6 +156,7 @@ git config user.email "you@example.com"
 
 ## Docs
 
+- [docs/HANDOVER.md](docs/HANDOVER.md) - current state, next action, decisions already settled
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - how the pieces fit, and the maths
 - [docs/ROADMAP.md](docs/ROADMAP.md) - phase-by-phase plan with exit criteria
 - [docs/DEVICE-A07.md](docs/DEVICE-A07.md) - Galaxy A07 5G constraints and open risks
