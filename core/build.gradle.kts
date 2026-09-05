@@ -32,4 +32,10 @@ tasks.test {
     testLogging {
         events("passed", "failed", "skipped")
     }
+    // Forward the burst directory into the forked test JVM. A -D on the command
+    // line reaches the Gradle daemon and stops there, so without this the
+    // pixel-level replay tests skip silently and look like they passed.
+    System.getProperty("stablestill.burstDir")?.let {
+        systemProperty("stablestill.burstDir", it)
+    }
 }

@@ -1,0 +1,22 @@
+# stable-still burst archive
+formatVersion=2
+capturedAtEpochMillis=1788620078653
+deviceModel=SM-A076B
+androidSdkInt=36
+cameraId=0
+width=4080
+height=3060
+fx=3110.8047376422664
+fy=3098.931259920837
+cx=2040.0
+cy=1530.0
+sensorOrientationDegrees=90
+frontFacing=false
+handedness=1
+shutterNanos=272147748972250
+gravityX=0.7636330127716064
+gravityY=9.565532684326172
+gravityZ=2.0218279361724854
+frameCount=8
+gyroSampleCount=190
+notes=Captured at 12.5 MP - 20 fps.
