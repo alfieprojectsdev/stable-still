@@ -30,20 +30,20 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Confirm the exposure cap works, then re-shoot a burst in daylight.**
+**Re-shoot a burst in daylight, then read one back.**
 
-Everything captured so far was shot in a dark room at 50 ms exposure. Those
-bursts prove the archive format and nothing else: too dark to align against,
-too blurred to judge. The cap is implemented and installed but has never run.
+The exposure cap works - 20.0 ms exact, ISO 1047, sharp at 1:1 - so capture is
+producing bursts worth analysing. What is missing is light and a reader.
 
-On the phone: **Capture** tab, resolution **12.5 MP**, depth **8**, max
-exposure **20 ms**, **Start camera**, wait for 8/8, hold it, **Save burst**.
-Check that the reported exposure is 20 ms rather than 50, and that ISO rose to
-compensate. `adb shell input tap` does not work on this handset, so this needs
-a finger.
+**Daylight, both resolutions.** Everything captured so far is an indoor room at
+night. The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be settled against
+ISO 1047 frames, because noise that heavy dominates whatever difference the
+frame span makes. On the phone: **Capture** tab, depth **8**, max exposure
+**20 ms**, one burst at each resolution. `adb shell input tap` does not work on
+this handset, so this needs a finger.
 
-Then the same in good light, at both resolutions, which is what settles the
-20-vs-30 fps question `docs/DEVICE-A07.md` leaves open.
+**Then read one back**, per the next section. That is the step that actually
+moves the project.
 
 ---
 

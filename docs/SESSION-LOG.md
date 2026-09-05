@@ -98,12 +98,25 @@ Bugs the real bursts exposed, both since fixed:
   30 fps, against a design assuming 20 ms. Addressed by capping exposure and
   taking the shortfall as gain, with AE left to do the metering.
 
+### The exposure cap, confirmed on hardware
+
+Three bursts at 12.5 MP with the cap at 20 ms. Exposure came back at exactly
+20.0 ms on every frame, ISO at 1047 - AE's own 419 scaled by exactly the 2.5x
+the cap demanded - and mean luma rose from 4 to 80 at *less than half* the
+exposure. The 20 fps pin survived `CONTROL_AE_MODE_OFF`, so frame spacing is
+unchanged at 50.1 ms.
+
+ISO is constant across all eight frames, which is the property the "apply once"
+design was protecting: a lock re-evaluated per frame would let brightness drift
+mid-burst, and the weighted merge cannot absorb that.
+
+At 1:1 the frames are sharp and noisy. That is the right side of the trade -
+noise averages down across a stack, blur does not.
+
 ### Left open
 
-- The exposure cap is **implemented and installed but not confirmed on
-  hardware**. It needs one capture with the cap set to 20 ms.
-- The five captured bursts are **too dark and too blurred to judge alignment**.
-  They prove the format, nothing more. Re-shoot in daylight with the cap on.
+- Everything so far is **indoors at night**. The capped burst is usable, but
+  the 20-vs-30 fps comparison still wants daylight at both resolutions.
 - **Nothing reads an archive back yet.** The handover's step 2 - stack a saved
   burst in a JVM test - is untouched.
 - `recommendedStackDepth()` returns 12 for every size this camera offers; the

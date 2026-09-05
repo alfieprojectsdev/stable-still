@@ -186,14 +186,29 @@ two and a half times that much motion blur, and the anchor's own blur is baked
 into the output - no amount of alignment removes it. Stacking trades noise for
 sharpness, so an exposure this long spends the thing the stack is meant to buy.
 
-The device is `LEVEL_3` with `supportsManualSensor`, so exposure can be capped
-explicitly and the shortfall taken as gain instead. That is the right lever, and
-it should be pulled before any burst is used to judge alignment quality.
+**Capping it works, and is now the default.** The device is `LEVEL_3` with
+`supportsManualSensor`, so AE is allowed to meter the scene and then the
+request is re-issued with exposure clamped and the shortfall taken as gain.
+Measured on the same indoor scene:
 
-Related: the archive does not record `SENSOR_SENSITIVITY`. Two bursts of the
-same scene came back at visibly different brightness with identical exposure
-times, which can only have been ISO, and without it a stack cannot normalise
-between frames or explain the difference.
+| | Uncapped | Capped at 20 ms |
+|---|---|---|
+| Exposure | 50 ms | **20.0 ms**, exact, on every frame |
+| ISO | unrecorded | **1047** - AE's 419 scaled by exactly 2.5 |
+| Mean luma | 4 | **80** |
+| Frame interval | 50.1 ms | 50.1 ms - the fps pin survives `AE_MODE_OFF` |
+
+At 1:1 the capped frames are sharp with heavy sensor noise, which is the trade
+worth making: a stack averages noise down across frames and cannot recover
+blur from any of them.
+
+ISO is identical across all eight frames, which matters as much as its value.
+The lock is applied once rather than per frame precisely so brightness cannot
+drift mid-burst - variation the weighted merge has no way to absorb.
+
+`SENSOR_SENSITIVITY` now travels in the archive (format version 2). Without it
+two bursts of one scene at the same exposure and different gain differ by a
+factor nothing in the data explains.
 
 ### Full resolution costs frame rate, and frame rate costs alignment
 
