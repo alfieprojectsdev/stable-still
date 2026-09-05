@@ -203,3 +203,13 @@ At 0.10, eight frames bought 2.9 frames' worth of averaging. The default is
 deliberately unchanged: a static room cannot ghost, so this says nothing about
 the moving-subject case the rejection exists for. The fix is a sigma that
 scales with measured noise, not a different constant.
+
+### Session ended here
+
+Stopped 5 September 2026, late evening. All phases that exist now run end to
+end: probe, capture, archive, JVM replay, GPU merge.
+
+Next session starts with **making `rejectSigma` scale with measured noise**.
+The data needed is already in the archive - ISO travels in the manifest as of
+format version 2 - and `BurstReplayer` can be pointed at a saved burst with a
+sigma on the command line, so the change can be measured rather than guessed.
