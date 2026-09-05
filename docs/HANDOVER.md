@@ -5,6 +5,9 @@ here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
 Updated 5 September 2026, at the end of the first local session.
 
+Phases 0 and 1 are done and a saved burst replays on a JVM. Phase 3 - the GPU
+warp and merge - has still never executed.
+
 ---
 
 ## Status in one table
@@ -12,10 +15,10 @@ Updated 5 September 2026, at the end of the first local session.
 | Phase | What | State |
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
-| 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved to disk.** |
-| 2 | Motion maths | **46 unit tests passing.** |
+| 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
+| 2 | Motion maths | **51 unit tests passing**, including a real-burst replay. |
 | 3 | GPU warp + merge | Written. **Never run.** |
-| 4 | Sync calibration + optical refinement | Mostly deleted by measurement; see below. |
+| 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
 | 5 | Product UX | Not started. |
 
 `:app` now builds and runs on the A07. The warning that it had never been
@@ -30,30 +33,40 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Re-shoot a burst in daylight, then read one back.**
+**Run the GPU path against a saved burst.**
 
-The exposure cap works - 20.0 ms exact, ISO 1047, sharp at 1:1 - so capture is
-producing bursts worth analysing. What is missing is light and a reader.
+Capture and replay both work now. A burst goes to disk, comes back on a JVM,
+and produces a sensible alignment plan - `BurstReplayTest` does exactly that
+against a real burst from this phone. What has never executed is Phase 3: the
+warp and merge.
 
-**Daylight, both resolutions.** Everything captured so far is an indoor room at
-night. The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be settled against
-ISO 1047 frames, because noise that heavy dominates whatever difference the
-frame span makes. On the phone: **Capture** tab, depth **8**, max exposure
-**20 ms**, one burst at each resolution. `adb shell input tap` does not work on
-this handset, so this needs a finger.
+That is the last untested stage, and it is now the cheapest it will ever be to
+test, because there is a known-good input and a known-good plan to feed it.
 
-**Then read one back**, per the next section. That is the step that actually
-moves the project.
+Two capture errands worth doing whenever convenient, neither blocking:
+
+- **Daylight, both resolutions.** Everything so far is an indoor room at night.
+  The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be settled against ISO
+  1047 frames, where noise dominates whatever the frame span contributes.
+- **A deliberately shaky burst.** Every burst so far was steady, which is why
+  the crop question below is still open.
+
+On the phone: **Capture** tab, depth **8**, max exposure **20 ms**.
+`adb shell input tap` does not work on this handset, so capture needs a finger.
 
 ---
 
-## After that
+## Open question the reader can now answer cheaply
 
-1. **Read an archive back.** Nothing does yet. A JVM test in `:core` that loads
-   a saved burst, integrates its gyro trace and solves the alignment is the
-   step that turns every later bug into a desk problem. The format and its
-   round-trip tests are already there; the reader is not.
-2. **Then** the GPU path, which has still never run.
+**The 12% crop margin may be far too generous.** Replaying the one capped
+burst: worst rotation 10.4 mrad against a budget of 118 mrad, so 9% of the
+margin was used. A 12% margin per side costs 38% of the pixel count, which is a
+lot of resolution to spend on headroom nobody touched.
+
+One steady indoor burst is not grounds for changing the default - a tremor is
+precisely the case that would use the margin, and none has been captured. But
+`BurstReplayTest` makes the question a matter of replaying a handful of bursts
+rather than arguing.
 
 ---
 
@@ -76,6 +89,47 @@ built, and because it is the fallback if a second device grades differently:
   stacker, roughly what Google's HDR+ does. Still a real and useful app. None
   of the capture, merge, or crop work is wasted; only the source of the
   homography changes.
+
+---
+
+## Product direction under consideration
+
+**Document capture for people with unsteady hands** - photographing specific
+pages in a library, legibly, for citation and annotation. Raised 5 September
+2026; not decided, recorded because it changes a technical priority.
+
+Why it suits this design better than general photography:
+
+- The subject is **flat and static**, so the merge's rejection logic has
+  nothing to reject and every frame contributes fully. No ghosting case exists.
+- Libraries are dim and flash is usually banned or useless on glossy paper,
+  which forces high ISO - and noise is what stacking removes.
+- Text is the ideal thing to sharpen, and legibility is pass/fail rather than
+  aesthetic, so results can be judged honestly.
+- Nothing in that market targets tremor. Adobe Scan, Google Lens and Microsoft
+  Lens are all essentially single-frame.
+
+**The catch, and it is architectural.** A gyroscope sees rotation only.
+`BurstAligner` assumes translation parallax is sub-pixel, which holds beyond a
+couple of metres and does not hold for a page at 30 cm: at f ~ 3110, one
+millimetre of hand *translation* shifts the image by about 10 px, and tremor
+over a 350 ms burst is comfortably several millimetres. Gyro-only alignment
+would leave 10-30 px of residual - unnoticeable on a landscape, fatal on
+8-point type.
+
+So this use case promotes **optical refinement from a Phase 4 polish step to a
+requirement**. The consolation is that a page is the easiest possible case for
+it: planar, richly textured, no moving elements, no internal parallax. A planar
+scene's true inter-frame motion *is* a homography, so refinement is
+well-conditioned and the gyro supplies a good initial estimate.
+
+Two smaller consequences: the crop budget fights tight page framing, since
+people frame edge-to-edge; and a static subject permits **more frames over a
+longer window** than a moving scene would, because nothing can ghost.
+
+Next step if pursued: capture a burst of a book page in library light. The
+reader will report how much residual the gyro leaves, which is the number that
+decides whether Phase 4 comes before Phase 3.
 
 ---
 

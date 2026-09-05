@@ -8,7 +8,7 @@ This file carries how it got there.
 
 ---
 
-## 2026-09-05 - Phase 0 run, Phase 1 started
+## 2026-09-05 - Phase 0 run, Phase 1 built and replayed
 
 First local session. The project arrived from a cloud session with `:core`
 tested and `:app` never compiled by anything.
@@ -113,12 +113,54 @@ mid-burst, and the weighted merge cannot absorb that.
 At 1:1 the frames are sharp and noisy. That is the right side of the trade -
 noise averages down across a stack, blur does not.
 
+### The offline reader, and what replaying a real burst showed
+
+`BurstReader` closes the loop the archive was built for: a burst captured on
+the phone now replays on a JVM in milliseconds.
+
+The test fixture is a genuine burst - manifest, frame timing, all 190 gyro
+samples - minus the eight 17.9 MB frame files, because everything up to and
+including the alignment plan is decided by timestamps and angular velocity
+rather than pixels. So the replay runs anywhere, and
+`-Dstablestill.burstDir=...` points the pixel checks at a full burst when one
+is to hand. That property has to be forwarded explicitly in `core/build.gradle.kts`:
+a `-D` on the command line reaches the Gradle daemon and stops there, which had
+the pixel tests skipping while looking like they passed.
+
+Replaying the capped burst through `BurstAligner`:
+
+| Frame | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| Shift (px) | 5.6 | **0.0** | 6.0 | 8.5 | 17.1 | 24.0 | 31.6 | 43.1 |
+| Rotation (mrad) | 1.38 | **0.00** | 1.59 | 2.22 | 4.01 | 5.68 | 7.43 | 10.37 |
+
+All eight frames usable, anchor at index 1, rotation growing monotonically away
+from it - which is what a correct integration of real hand motion looks like.
+
+The alignment test carries a lower bound as well as an upper one, deliberately.
+A track that integrated to *nothing* - what a units slip or an over-eager bias
+subtraction produces - leaves every shift at zero and sails through any test
+that only checks shifts are small.
+
+**The 12% crop is roughly fifteen times what that burst needed.** Worst
+rotation 10.4 mrad against a budget of 118 mrad, so 9% of the margin was used.
+12% per side discards 38% of the pixel count, which is a great deal of
+resolution to spend on headroom nobody used. One steady indoor burst is not
+grounds for changing the default, but the reader now makes it cheap to ask
+across many.
+
 ### Left open
 
 - Everything so far is **indoors at night**. The capped burst is usable, but
   the 20-vs-30 fps comparison still wants daylight at both resolutions.
-- **Nothing reads an archive back yet.** The handover's step 2 - stack a saved
-  burst in a JVM test - is untouched.
+- The crop margin is unexamined against a **shaky** hand; every burst so far
+  was steady.
+- **Phase 3 has still never executed.** The GPU warp and merge are the last
+  untested stage, and now the cheapest to test: there is a known-good burst and
+  a known-good alignment plan to feed them.
 - `recommendedStackDepth()` returns 12 for every size this camera offers; the
   clamp binds, never the RAM budget. 214 MB of native buffers on a 3.4 GB phone
   is ungoverned.
+- **Document capture was raised as a product direction** and is recorded in the
+  handover. It would promote optical refinement to a requirement, because a
+  gyroscope cannot see the translation that dominates at page distance.
