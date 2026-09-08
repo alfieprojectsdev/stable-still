@@ -6,8 +6,8 @@ here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 Updated 8 September 2026. The substantive work is from the 5 September session;
 since then only the route to the phone changed.
 
-Phases 0 and 1 are done and a saved burst replays on a JVM. Phase 3 - the GPU
-warp and merge - has still never executed.
+Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. What is
+left is tuning them against light and motion that has not been captured yet.
 
 ---
 
@@ -36,13 +36,12 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 **Make `rejectSigma` scale with noise, then re-shoot in daylight.**
 
-Capture and replay both work now. A burst goes to disk, comes back on a JVM,
-and produces a sensible alignment plan - `BurstReplayTest` does exactly that
-against a real burst from this phone. What has never executed is Phase 3: the
-warp and merge.
-
-That is the last untested stage, and it is now the cheapest it will ever be to
-test, because there is a known-good input and a known-good plan to feed it.
+The whole pipeline runs. The one measured shortcoming is the rejection
+threshold: at ISO 1047 a fixed `rejectSigma` of 0.10 bought only 1.69x noise
+reduction from eight frames, where 0.40 bought 3.0x. The constant was left
+alone deliberately - the test burst was a static room and cannot ghost, so a
+looser threshold is untested against anything that moves. The fix is a sigma
+derived from the burst's own noise; the ISO is already in the manifest.
 
 Two capture errands worth doing whenever convenient, neither blocking:
 
