@@ -3,7 +3,8 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 5 September 2026, at the end of the first local session.
+Updated 8 September 2026. The substantive work is from the 5 September session;
+since then only the route to the phone changed.
 
 Phases 0 and 1 are done and a saved burst replays on a JVM. Phase 3 - the GPU
 warp and merge - has still never executed.

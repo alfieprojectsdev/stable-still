@@ -8,6 +8,30 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-08 - Tailscale as the route to the phone
+
+Short session, no code changes.
+
+The A07 joined the tailnet, and its Wireless debugging screen then advertised
+the *tailnet* address rather than the LAN one - `adbd` binds to all interfaces
+- so `adb connect 100.79.189.46:<port>` works and shell, pull and screencap
+all behave normally over it. That removes the same-network requirement
+entirely: the phone can be on mobile data, or the laptop elsewhere.
+
+Two caveats, neither obvious:
+
+- mDNS does not cross a tailnet, so nothing auto-discovers. The port still has
+  to be read off the phone whenever wireless debugging restarts.
+- With the mDNS transport also live, one physical phone appears twice in
+  `adb devices`, which breaks any bare `adb` command until one is dropped or
+  `-s` is passed.
+
+A first attempt with a stale port returned "actively refused" rather than a
+timeout - a TCP reset from the phone, which was already proof the tailnet
+route worked and only the port was wrong.
+
+---
+
 ## 2026-09-05 - Phase 0 run, Phase 1 built and replayed
 
 First local session. The project arrived from a cloud session with `:core`
@@ -31,17 +55,8 @@ tested and `:app` never compiled by anything.
 - **Synthetic input is blocked on this handset.** `adb shell input tap` returns
   cleanly and does nothing, so on-device UI steps need a human finger. Reading
   the screen (`screencap` + `pull`) and pulling files both work fine.
-- **Tailscale beats mDNS for reaching the phone.** Once the A07 joined the
-  tailnet, its Wireless debugging screen advertised the *tailnet* address
-  rather than the LAN one - `adbd` binds to all interfaces - so
-  `adb connect 100.79.189.46:<port>` works, and shell, pull and screencap all
-  behave normally over it. That removes the same-network requirement
-  entirely: the phone can be on mobile data, or the laptop elsewhere. Two
-  caveats. mDNS does not cross a tailnet, so nothing auto-discovers and the
-  port must still be read off the phone each time wireless debugging
-  restarts. And if the mDNS transport is also live, both appear in
-  `adb devices` as the same physical phone, so commands need `-s` or one
-  transport disconnected.
+- **Wireless debugging over Tailscale** superseded mDNS on 8 September; see
+  that entry below.
 
 ### Two build fixes
 
