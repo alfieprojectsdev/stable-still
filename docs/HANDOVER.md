@@ -3,8 +3,7 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 8 September 2026. The substantive work is from the 5 September session;
-since then only the route to the phone changed.
+Updated 8 September 2026.
 
 Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. What is
 left is tuning them against light and motion that has not been captured yet.
@@ -17,8 +16,8 @@ left is tuning them against light and motion that has not been captured yet.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **51 unit tests passing**, including a real-burst replay. |
-| 3 | GPU warp + merge | **Runs. Replays a saved burst; one flip bug fixed.** |
+| 2 | Motion maths | **57 unit tests passing**, including a real-burst replay. |
+| 3 | GPU warp + merge | **Runs. Replays a saved burst; threshold now derived from noise.** |
 | 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
 | 5 | Product UX | Not started. |
 
@@ -34,25 +33,39 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Make `rejectSigma` scale with noise, then re-shoot in daylight.**
+**Capture a burst with something moving in it.**
 
-The whole pipeline runs. The one measured shortcoming is the rejection
-threshold: at ISO 1047 a fixed `rejectSigma` of 0.10 bought only 1.69x noise
-reduction from eight frames, where 0.40 bought 3.0x. The constant was left
-alone deliberately - the test burst was a static room and cannot ghost, so a
-looser threshold is untested against anything that moves. The fix is a sigma
-derived from the burst's own noise; the ISO is already in the manifest.
+Everything in the archive is a still room, and that is now the binding
+constraint rather than a gap worth noting. `rejectSigma` is derived from
+measured noise as of 8 September, but only its lower half is evidence: the
+threshold sweep meant to set the ceiling was degenerate, because against a
+static scene noise reduction improves monotonically to the clamp and rejection
+has nothing to earn its keep against. `SIGMA_PER_NOISE = 6.5` is derived from
+the Maxwell distribution of a three-channel noise difference, not fitted, and
+it will stay a guess until a burst exists that can ghost.
 
-Two capture errands worth doing whenever convenient, neither blocking:
+Anything moving will do: a person crossing frame, a hand waved through it,
+traffic. Then replay it at several thresholds and find where ghosting starts -
+that upper bound is the missing number.
 
-- **Daylight, both resolutions.** Everything so far is an indoor room at night.
-  The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be settled against ISO
-  1047 frames, where noise dominates whatever the frame span contributes.
-- **A deliberately shaky burst.** Every burst so far was steady, which is why
-  the crop question below is still open.
+Two more capture errands, neither blocking:
+
+- **Daylight, both resolutions.** The 20-vs-30 fps trade in
+  `docs/DEVICE-A07.md` cannot be settled against ISO 1047 frames, where noise
+  dominates whatever the frame span contributes.
+- **A deliberately shaky burst**, for the crop question below.
 
 On the phone: **Capture** tab, depth **8**, max exposure **20 ms**.
 `adb shell input tap` does not work on this handset, so capture needs a finger.
+Replaying afterwards does not:
+
+```
+adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
+    --ez autoReplay true --es rejectSigma 0.40
+```
+
+Omit `rejectSigma` to use the derived one. Results land under the `AutoReplay`
+logcat tag, and the output JPEG is named after the threshold that produced it.
 
 ---
 
@@ -129,7 +142,7 @@ longer window** than a moving scene would, because nothing can ghost.
 
 Next step if pursued: capture a burst of a book page in library light. The
 reader will report how much residual the gyro leaves, which is the number that
-decides whether Phase 4 comes before Phase 3.
+decides whether optical refinement is the next thing built.
 
 ---
 
