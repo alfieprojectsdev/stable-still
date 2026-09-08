@@ -7,6 +7,7 @@ import dev.alfieprojects.stablestill.core.BurstAligner
 import dev.alfieprojects.stablestill.core.BurstReader
 import dev.alfieprojects.stablestill.core.CropWindow
 import dev.alfieprojects.stablestill.core.MotionTrack
+import dev.alfieprojects.stablestill.core.NoiseModel
 import dev.alfieprojects.stablestill.gl.EglCore
 import dev.alfieprojects.stablestill.gl.I420YuvSource
 import dev.alfieprojects.stablestill.gl.RenderFrame
@@ -25,6 +26,8 @@ data class ReplayResult(
     val outputWidth: Int,
     val outputHeight: Int,
     val maxCornerShiftPx: Double,
+    val rejectSigma: Float,
+    val measuredNoise: Double,
     val floatAccumulation: Boolean,
     val elapsedMillis: Long,
 )
@@ -46,10 +49,16 @@ class BurstReplayer(private val outputDir: File) {
         private const val TAG = "BurstReplayer"
     }
 
+    /**
+     * @param rejectSigma the merge's rejection threshold, or null to derive it
+     *   from the anchor frame's own noise. Null is the sane default: a fixed
+     *   threshold rejects genuine agreement precisely when gain is high and
+     *   there is most noise to average away.
+     */
     fun replay(
         directory: File,
         cropMarginFraction: Double = 0.12,
-        rejectSigma: Float = 0.10f,
+        rejectSigma: Float? = null,
         jpegQuality: Int = 95,
     ): ReplayResult {
         val started = System.currentTimeMillis()
@@ -66,6 +75,13 @@ class BurstReplayer(private val outputDir: File) {
             crop = crop,
         )
 
+        // Measured on the anchor rather than any frame: it is the reference
+        // every other frame is compared against, so its noise is what the
+        // threshold has to admit.
+        val anchorRecord = burst.frames.first { it.index == plan.anchorIndex }
+        val measuredNoise = NoiseModel.estimateNoise(BurstReader.readLuma(directory, anchorRecord))
+        val sigma = rejectSigma ?: NoiseModel.sigmaFor(measuredNoise)
+
         // Frames are read one at a time and released as soon as the GPU has
         // them. Eight 12.5 MP frames is 143 MB, and holding all of them as
         // direct buffers alongside the textures is how a 3.4 GB phone runs out.
@@ -79,7 +95,7 @@ class BurstReplayer(private val outputDir: File) {
                 outputHeight = crop.outputHeight,
                 useFloatAccumulation = egl.supportsFloatColorBuffer,
             ).use { renderer ->
-                renderer.rejectSigma = rejectSigma
+                renderer.rejectSigma = sigma
                 renderer.setup()
                 val sources = burst.frames.map { record ->
                     val bytes = ByteArray(
@@ -96,7 +112,7 @@ class BurstReplayer(private val outputDir: File) {
         }
 
         outputDir.mkdirs()
-        val output = File(outputDir, "${directory.name}-stacked.jpg")
+        val output = File(outputDir, "${directory.name}-s${"%.2f".format(sigma)}.jpg")
         FileOutputStream(output).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
         }
@@ -111,6 +127,8 @@ class BurstReplayer(private val outputDir: File) {
             outputWidth = crop.outputWidth,
             outputHeight = crop.outputHeight,
             maxCornerShiftPx = plan.alignments.maxOfOrNull { it.maxCornerShiftPx } ?: 0.0,
+            rejectSigma = sigma,
+            measuredNoise = measuredNoise,
             floatAccumulation = true,
             elapsedMillis = System.currentTimeMillis() - started,
         )

@@ -239,3 +239,58 @@ Next session starts with **making `rejectSigma` scale with measured noise**.
 The data needed is already in the archive - ISO travels in the manifest as of
 format version 2 - and `BurstReplayer` can be pointed at a saved burst with a
 sigma on the command line, so the change can be measured rather than guessed.
+
+---
+
+## 2026-09-08 (later) - rejectSigma derived from measured noise
+
+`rejectSigma` was a constant. It is now derived from the anchor frame's own
+noise, in `:core` with tests, because the distance between two *correctly
+aligned* frames is itself proportional to sensor noise - so a fixed threshold
+rejects genuine agreement precisely when gain is high and there is most noise
+to average away.
+
+`NoiseModel.estimateNoise` takes the standard deviation inside 8 px tiles and
+returns the 25th percentile across them. Not the mean, which every edge drags
+upward; not the median, which only survives while most of the frame is flat;
+not the minimum, which a clipped black region takes to zero. On the fixture
+burst it reports **0.0250 (6.4/255)**, stable to three digits across frames.
+
+Note this is a different statistic from the 9.87/255 quoted in the entry above,
+which was a mean over tiles. Both are "the noise", measured differently.
+
+### The sweep was degenerate, and that is the finding
+
+Eight thresholds against the same ISO 1047 burst:
+
+| sigma | 0.10 | 0.15 | 0.16 | 0.20 | 0.25 | 0.30 | 0.40 | 0.55 |
+|---|---|---|---|---|---|---|---|---|
+| stacked noise | 5.85 | 5.14 | 5.03 | 4.77 | 4.49 | 4.25 | 3.82 | 3.38 |
+| reduction | 1.69x | 1.92x | 1.96x | 2.07x | 2.20x | 2.32x | 2.58x | 2.92x |
+
+There is no knee. Noise falls monotonically to the clamp, which is exactly
+what a *static* scene must do: with nothing moving, a looser threshold is
+always better, and the rejection has nothing to earn its keep against. So the
+sweep cannot calibrate the constant. Fitting to it would drive the threshold
+to its maximum and buy a ghosting regression on the first moving subject.
+
+`SIGMA_PER_NOISE = 6.5` is therefore derived rather than fitted: the
+difference of two noisy samples carries sqrt(2) the noise of either, and the
+magnitude of that difference across three channels is Maxwell-distributed with
+its 99.9th percentile near 4.6 standard deviations, so sqrt(2) * 4.6 = 6.5
+admits essentially all genuine noise.
+
+On the fixture that yields sigma **0.162** and 1.96x reduction, against 1.69x
+for the old constant. A real improvement, and well short of the 2.92x the
+loosest threshold reached - deliberately, since none of that headroom is
+justified until something moves in frame.
+
+### Left open
+
+- **The ceiling is unmeasured.** Setting it needs a burst containing motion:
+  a person walking, a hand crossing the frame, traffic. Until then the model
+  is sound in its lower half and guesswork in its upper.
+- The identity NCC against the anchor falls as sigma rises, 0.9885 to 0.9601.
+  That is averaging working, not drift - the output is meant to stop
+  resembling any single frame - but it means NCC-against-anchor cannot double
+  as a correctness check once the threshold is loose.

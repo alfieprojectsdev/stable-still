@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
                     BurstReplayer(File(getExternalFilesDir(null), "captures"))
                         .replay(
                             BurstCaptureController(this@MainActivity).savedBursts().first(),
-                            rejectSigma = (intent.getStringExtra("rejectSigma")?.toFloatOrNull() ?: 0.10f),
+                            rejectSigma = intent.getStringExtra("rejectSigma")?.toFloatOrNull(),
                         )
                 }
             }
@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
                     AUTO_REPLAY_TAG,
                     "OK source=${it.sourceDirectory.name} merged=${it.framesMerged}/${it.framesTotal} " +
                         "anchor=${it.anchorIndex} out=${it.outputWidth}x${it.outputHeight} " +
-                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px sigma=${(intent.getStringExtra("rejectSigma")?.toFloatOrNull() ?: 0.10f)} ms=${it.elapsedMillis} " +
+                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px noise=${"%.4f".format(it.measuredNoise)} sigma=${"%.3f".format(it.rejectSigma)} ms=${it.elapsedMillis} " +
                         "file=${it.output.absolutePath}",
                 )
             }.onFailure { Log.e(AUTO_REPLAY_TAG, "FAILED: ${it.stackTraceToString()}") }
