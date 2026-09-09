@@ -3,7 +3,7 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 9 September 2026 (second session).
+Updated 9 September 2026 (third session).
 
 Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. The
 merge's rejection threshold is now measured at both ends. What is left is
@@ -34,27 +34,33 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Capture a dark indoor burst with a moving subject.**
+**Capture a lamp-lit burst with a moving subject - dimmer light, not a darker
+room.**
 
-One question is left from the threshold work: does the ghosting onset scale
-with the frame's noise, or sit at a fixed value? It cannot be answered from the
-bright end. `estimateNoise` is limited by scene texture rather than by the
-sensor on any real textured scene - ISO 25 through ISO 376 all report
-0.009-0.014, a range far narrower than their gain - so a brighter burst does
-not move the number. The high-noise end does: ISO 1000+, indoors, with a hand
-or a person crossing frame.
+This is the one burst that would let `MAX_SIGMA` rise from 0.15, which is worth
+about 6% of the noise reduction at high ISO. What it needs:
 
-Everything else the threshold work needed is captured. Two other errands are
-outstanding and neither blocks:
+- **Ambient dim enough to force ISO 1000+**, but the subject exposed near
+  mid-histogram - **mean luma 80-100**, not a frame that looks black on screen.
+- **A hand crossing frame** against a plain background, ~30 cm, one smooth
+  pass, plus **a static control** of the same scene.
 
-- **The 20-vs-30 fps trade.** The 12.5 MP and 8 MP daylight pairs it needs now
-  exist, from 9 September, and are unexamined.
-- **A deliberately shaky burst**, for the crop question below.
+Turning the lights off does not work and has already been tried. Darkness
+raises gain but lowers signal faster, so absolute noise *falls*: two bursts at
+identical ISO 1047 measured 0.0250 at mean luma 81 and 0.0143 at mean luma 19.
+Note also that **12.5 MP caps at ISO 1047**; the 8 MP mode reaches ~3000.
+
+Two errands remain outstanding and neither blocks:
+
+- **The 20-vs-30 fps trade.** The 12.5 MP and 8 MP daylight pairs it needs
+  exist as of 9 September and are unexamined.
+- **A deliberately shaky burst**, for the crop question below - though two dim
+  bursts already merged only 6 of 8 frames at ~350 px of corner shift.
 
 On the phone: **Capture** tab, depth **8**, max exposure **20 ms**. Watch that
-auto-exposure does not hold 20 ms in bright light - three of the nine rooftop
-bursts came back 52-73% clipped that way. `adb shell input tap` does not work
-on this handset, so capture needs a finger. Replaying afterwards does not:
+auto-exposure does not hold 20 ms in bright light - three rooftop bursts came
+back 52-73% clipped that way. `adb shell input tap` does not work on this
+handset, so capture needs a finger. Replaying afterwards does not:
 
 ```
 adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
@@ -76,34 +82,34 @@ being silently ignored is the symptom.
 
 ---
 
-## The rejectSigma threshold is measured at both ends, as of 9 September
+## The rejectSigma threshold, as of 9 September
 
 `MAX_SIGMA` is **0.15**, down from a guessed 0.60. `MIN_SIGMA` stays at 0.06
-and `SIGMA_PER_NOISE` at 6.5, both now tested rather than assumed. Fourteen
-bursts across ISO 25 to 1047, indoor and rooftop; the numbers are in
-`docs/SESSION-LOG.md`. The short version:
+and `SIGMA_PER_NOISE` at 6.5, both tested rather than assumed. Twenty-two
+bursts across ISO 25 to 3055, indoor, rooftop and dim; numbers in
+`docs/SESSION-LOG.md`. What is settled:
 
-- **Noise reduction is finished by 0.06 to 0.12**, in every burst measured.
-  Above that it improves by hundredths of an 8-bit level.
-- **The ghosting onset tracks alignment residual, not noise.** 28 px of corner
-  shift ghosts at about 0.40; 177 px at about 0.25; 253 px with a hand crossing
-  frame at **0.15**. A moving subject is what binds, as it should be - it is the
-  only case where the disagreement is signal rather than error.
-- **A static scene ghosts too**, at about 0.40, where residual misalignment
-  doubles high-contrast edges. Nothing in frame moved. Rejection was the only
-  thing hiding it.
-
-That last point cost the 8 September session its answer - it reasoned that a
-still room cannot calibrate this. It can; whole-frame noise is precisely the
-quantity a looser threshold always improves, so it cannot express what one
-costs.
+- **The benefit scales with noise.** Residual noise stops improving at 9-10x
+  the frame's measured noise, consistently across a 3.6x range. That is what
+  justifies deriving the threshold from noise at all, and why 6.5 is a sound
+  multiplier - it sits below the knee everywhere.
+- **The cost is set by alignment residual, not gain.** 28 px of corner shift
+  ghosts near 0.40; 177 px near 0.25; 253 px with a hand crossing frame at
+  **0.15**. A moving subject binds, as it should - it is the only case where
+  the disagreement is signal rather than error.
+- **A static scene ghosts too**, near 0.40, where residual misalignment doubles
+  high-contrast edges. Nothing in frame moved. That cost the 8 September
+  session its answer: it reasoned a still room cannot calibrate this, and the
+  metric in use simply could not see it.
 
 **This raises the stakes on optical refinement.** If the ceiling is a
 consequence of alignment error, refinement does not merely sharpen the output -
 it raises the ceiling, and buys back the noise reduction the ceiling forgoes.
 
-The open question is whether the onset *scales* with noise or is fixed. See
-"Do this first" for why the bright end cannot answer it.
+What is *not* settled is whether the ghosting onset scales with noise the way
+the knee does. The evidence leans yes - 3.6x the noise bought roughly 2.7x the
+onset at matched shift - but subject texture confounds it, since fine texture
+washes out long before bold type doubles. See "Do this first".
 
 ---
 

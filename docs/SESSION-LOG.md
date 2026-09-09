@@ -8,6 +8,103 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-09 (third) - you cannot make a frame noisier by turning the lights off
+
+Eight dim indoor bursts, captured to settle whether the ghosting onset scales
+with noise. They do not settle it, because the premise behind asking for them
+was wrong. What did settle is the *knee*, which scales cleanly, and that turns
+out to be the more load-bearing half.
+
+### The premise was wrong
+
+Darkness raises gain but lowers signal, and it lowers signal faster. Shot noise
+goes as the square root of signal, so the absolute pixel differences the merge
+compares against get *smaller* as a room gets darker. Two bursts at identical
+ISO 1047 and 12.5 MP make the point without any inference:
+
+| burst | ISO | mean luma | crushed | measured noise |
+|---|---|---|---|---|
+| 5 Sept archive | 1047 | 80.9 | 0.6% | **0.0250** |
+| 9 Sept dim | 1047 | 18.7 | 16.8% | **0.0143** |
+
+Same gain, same sensor, same resolution. The darker one measures *less* noise,
+because 86% of its pixels sit in the bottom eighth of the range. All eight dim
+bursts came back at mean luma 20-37 against 104 for a lit room, two of them
+effectively black.
+
+This is not a fault in `NoiseModel`. The merge compares absolute differences,
+so a dark frame genuinely has smaller ones, and reporting that is correct. The
+fault was in asking for a darker room instead of a *dimmer-lit* one.
+
+**What a high-noise burst actually requires** is high gain at correct exposure:
+ambient dim enough to force ISO 1000+, but a subject exposed near mid-histogram
+(mean luma 80-100). The 5 September archive burst is exactly that and remains
+the noisiest sample in the collection.
+
+Also learned, and worth knowing before chasing gain: **12.5 MP caps at ISO
+1047.** Three bursts and the archive all sit at exactly that figure. The 8 MP
+mode reaches 2425-3055, presumably binned. Past the cap, a darker room only
+underexposes.
+
+### The knee scales, and that is the useful result
+
+Where residual noise stops improving, against the frame's measured noise:
+
+| burst | noise | knee | knee / noise |
+|---|---|---|---|
+| 113426 rooftop | 0.0069 | ~0.06 | 8.7 |
+| 113227 rooftop | 0.0097 | ~0.09 | 9.3 |
+| 085821 indoor static | 0.0128 | ~0.12 | 9.4 |
+| 085849 indoor motion | 0.0136 | ~0.12-0.15 | 9-11 |
+| 225438 archive | 0.0250 | ~0.20-0.25 | 8-10 |
+
+**Nine to ten times the measured noise, across a 3.6x range.** That is what
+justifies the shape of the model: the *benefit* of a looser threshold scales
+with noise, which is precisely what `SIGMA_PER_NOISE` encodes, and 6.5 sits
+below the knee everywhere with margin to spare.
+
+### The onset probably scales too, but the evidence is muddier
+
+At near-matched alignment residual, comparing the noisiest burst with the
+cleanest:
+
+| burst | noise | shift | onset |
+|---|---|---|---|
+| 113426 rooftop | 0.0069 | 48 px | ~0.15 |
+| 225438 archive | 0.0250 | 43 px | ~0.40 |
+
+3.6x the noise, roughly 2.7x the onset - consistent with scaling, sub-linear if
+anything. But 113227 breaks the pattern: noise 0.0097 with only 28 px of shift
+and an onset near 0.40. Shift and *subject texture* both confound it. Weathered
+concrete loses its mottling long before bold printed type doubles, so "where
+ghosting starts" is partly a property of what is in frame. Three static scenes
+cannot separate three variables.
+
+### So MAX_SIGMA may be over-tight, and exactly one burst would say
+
+The clamp only ever binds above noise 0.023 - high ISO, correctly exposed. And
+that is the regime where the measured knee is 0.20-0.25 and the static onset is
+0.40, so holding at 0.15 costs real noise reduction: 2.07 against 1.94 levels
+on the archive burst, about 6%.
+
+Against that, the 0.15 figure came from a moving subject at noise 0.0136 -
+a regime where the clamp does *not* bind, since the derived threshold there is
+0.088. If the onset scales, the same subject at noise 0.0250 would ghost nearer
+0.28, and the clamp could rise.
+
+Left at **0.15**, because raising it on that reasoning would be fitting to an
+extrapolation, which is the mistake this whole thread of work exists to undo.
+The burst that decides it: **lamp-lit room, ISO 1000+, mean luma near 80, hand
+crossing frame, plus a static control of the same scene.** Not a darker room -
+a dimmer-lit one.
+
+### Incidental
+
+- Two dim bursts merged only 6 of 8 frames, at 375 px and 346 px of corner
+  shift. First time the crop budget has been approached rather than admired.
+
+---
+
 ## 2026-09-09 (later) - daylight, and a noise estimator that returned zero
 
 Nine rooftop bursts at ISO 25-64, from a phone on mobile data over Tailscale
