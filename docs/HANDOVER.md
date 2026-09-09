@@ -223,7 +223,7 @@ history makes sense.
 | **JDK for Gradle** | **Temurin 21** at `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot` |
 | Installed platform | API 35 only; build-tools 34 and 36 |
 | Device | Galaxy A07 5G, **Android 16 / API 36** - the listings saying 15 are wrong |
-| Debugging | Wireless (`adb pair`, then mDNS). Synthetic input is blocked. |
+| Debugging | `adb tcpip 5555`, over Tailscale. Synthetic input is blocked. |
 
 `compileSdk`/`targetSdk` are 35 because AGP 8.7.3 caps there. To move to API 37,
 bump AGP in `gradle/libs.versions.toml` **first**, then `compileSdk`. Doing it

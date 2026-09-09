@@ -83,6 +83,33 @@ the ceiling, which was read off crops at 1:1, but it means the 0.15 figure is a
 little more. Nothing above 0.12 buys noise reduction anyway, so there is no
 reason to go looking.
 
+
+### Getting adb to survive the phone leaving the desk
+
+Wireless debugging is tied to Wi-Fi. Take the phone off the network and Android
+switches it off, `adbd` stops listening, and the tailnet stays perfectly
+healthy with nothing on the other end - which reads as a Tailscale failure and
+is not one.
+
+`adb tcpip 5555` sets `service.adb.tcp.port` instead: a listener on all
+interfaces, independent of Wi-Fi, persisting across network changes until the
+next reboot. With the phone on mobile data and Tailscale up, `adb connect
+100.79.189.46:5555` then works from anywhere, and a replay sweep can run while
+the phone is somewhere else entirely. Set on 9 September and verified end to
+end.
+
+Two caveats. Port 5555 takes any connection that can reach it and falls back to
+the on-screen RSA prompt, where paired wireless debugging requires pairing
+first - fine over a tailnet, weaker on whatever LAN the phone rejoins. And the
+mDNS transport reappears on its own while the phone is on the same network, so
+one phone shows up twice and bare `adb` fails with "more than one
+device/emulator" until one is dropped or `-s` is passed. Leaving the network
+resolves that by itself.
+
+**Capture needs no connection at all.** The app writes bursts to the phone's
+own storage and the Capture tab confirms each save on screen, so a capture trip
+out of adb range loses nothing. Storage is not a constraint either: 66 GB free
+against 1.2 GB for ten bursts.
 ### Also
 
 - `--es burst <directoryName>` now selects which burst `autoReplay` stacks.
