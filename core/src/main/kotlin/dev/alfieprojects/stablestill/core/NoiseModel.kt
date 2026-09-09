@@ -82,6 +82,16 @@ object NoiseModel {
     }
 
     /**
+     * A tile this clipped carries no noise information and is skipped.
+     *
+     * Not a hypothetical. Three of nine rooftop bursts came back with 52-73% of
+     * their pixels at full white, because auto-exposure held 20 ms outdoors,
+     * and the percentile below then landed inside the blown-out region and
+     * returned exactly zero.
+     */
+    const val MAX_CLIPPED_FRACTION = 0.5
+
+    /**
      * Estimates per-channel noise from luma, as a fraction of full scale.
      *
      * Sampled as the standard deviation inside small tiles, and taken as a low
@@ -90,34 +100,47 @@ object NoiseModel {
      * which a densely textured scene is not. The flattest quarter of tiles is
      * where sensor noise is closest to being the only thing varying.
      *
-     * Not the minimum, though: a clipped black region has no variance at all
-     * and would report a noise floor of zero for a frame that is full of it.
+     * Clipped tiles are dropped before that percentile is taken. A region at
+     * full white or full black has no variance because the sensor ran out of
+     * range, not because it is quiet, and a frame with enough of it reports a
+     * noise floor of zero - which is what half a blown-out rooftop did. Taking
+     * a percentile rather than the minimum is not sufficient protection: it
+     * only survives while the clipped fraction stays under the percentile.
      *
-     * This measures noise *plus* whatever texture the flattest tiles still
-     * carry, so it is an upper bound. That errs toward a looser threshold,
-     * which costs ghosting resistance rather than noise reduction - the
-     * direction worth erring in only because the alternative silently discards
-     * most of the stack.
+     * A frame clipped everywhere still returns zero, and that is the honest
+     * answer - there is nothing left to measure. It yields [MIN_SIGMA], so the
+     * merge falls back to the anchor rather than averaging blind.
+     *
+     * What remains measures noise *plus* whatever texture the surviving flat
+     * tiles still carry, so it is an upper bound, and on a real textured scene
+     * in daylight that texture dominates: bursts from ISO 25 to ISO 376 all
+     * report between 0.009 and 0.014, a range far narrower than their gain. It
+     * cannot resolve low noise, only high.
      */
     fun estimateNoise(luma: LumaPlane, tile: Int = 8, stride: Int = 200): Double {
         require(tile >= 2) { "Tile must be at least 2 px, was $tile" }
         val deviations = ArrayList<Double>()
+        val clippedLimit = (tile * tile * MAX_CLIPPED_FRACTION).toInt()
         var y = 0
         while (y + tile <= luma.height) {
             var x = 0
             while (x + tile <= luma.width) {
                 var sum = 0.0
                 var sumSq = 0.0
+                var clipped = 0
                 for (ty in y until y + tile) {
                     for (tx in x until x + tile) {
-                        val v = luma[tx, ty].toDouble()
-                        sum += v
-                        sumSq += v * v
+                        val v = luma[tx, ty]
+                        if (v <= 2 || v >= 253) clipped++
+                        sum += v.toDouble()
+                        sumSq += v.toDouble() * v
                     }
                 }
-                val n = tile * tile
-                val variance = sumSq / n - (sum / n) * (sum / n)
-                deviations += sqrt(if (variance > 0.0) variance else 0.0)
+                if (clipped <= clippedLimit) {
+                    val n = tile * tile
+                    val variance = sumSq / n - (sum / n) * (sum / n)
+                    deviations += sqrt(if (variance > 0.0) variance else 0.0)
+                }
                 x += stride
             }
             y += stride

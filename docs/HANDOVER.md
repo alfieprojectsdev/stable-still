@@ -3,7 +3,7 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 9 September 2026.
+Updated 9 September 2026 (second session).
 
 Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. The
 merge's rejection threshold is now measured at both ends. What is left is
@@ -17,7 +17,7 @@ tuning the rest against light that has not been captured yet.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **59 unit tests passing**, including a real-burst replay. |
+| 2 | Motion maths | **61 unit tests passing**, including a real-burst replay. |
 | 3 | GPU warp + merge | **Runs. Replays a saved burst; threshold derived from noise, ceiling measured against motion.** |
 | 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
 | 5 | Product UX | Not started. |
@@ -34,17 +34,27 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Capture a daylight burst, at both resolutions.**
+**Capture a dark indoor burst with a moving subject.**
 
-The threshold work is finished - see below - and this is what is left that
-needs a finger. The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be
-settled against ISO 1047 frames, where noise dominates whatever the frame span
-contributes. A deliberately shaky burst is the other one worth having, for the
-crop question further down.
+One question is left from the threshold work: does the ghosting onset scale
+with the frame's noise, or sit at a fixed value? It cannot be answered from the
+bright end. `estimateNoise` is limited by scene texture rather than by the
+sensor on any real textured scene - ISO 25 through ISO 376 all report
+0.009-0.014, a range far narrower than their gain - so a brighter burst does
+not move the number. The high-noise end does: ISO 1000+, indoors, with a hand
+or a person crossing frame.
 
-On the phone: **Capture** tab, depth **8**, max exposure **20 ms**.
-`adb shell input tap` does not work on this handset, so capture needs a finger.
-Replaying afterwards does not:
+Everything else the threshold work needed is captured. Two other errands are
+outstanding and neither blocks:
+
+- **The 20-vs-30 fps trade.** The 12.5 MP and 8 MP daylight pairs it needs now
+  exist, from 9 September, and are unexamined.
+- **A deliberately shaky burst**, for the crop question below.
+
+On the phone: **Capture** tab, depth **8**, max exposure **20 ms**. Watch that
+auto-exposure does not hold 20 ms in bright light - three of the nine rooftop
+bursts came back 52-73% clipped that way. `adb shell input tap` does not work
+on this handset, so capture needs a finger. Replaying afterwards does not:
 
 ```
 adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
@@ -53,8 +63,10 @@ adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
 
 Omit `rejectSigma` to use the derived one, and `burst` to take the newest.
 Results land under the `AutoReplay` logcat tag, and the output JPEG is named
-after the threshold that produced it, so a sweep runs in one loop and is pulled
-in one go.
+after the threshold that produced it. **Leave a couple of seconds between
+replays**: the next `am start` otherwise races the previous activity's
+`finish()` and the run dies with `JobCancellationException`, which looks like a
+pipeline crash and is not one.
 
 **From a worktree, `:app` needs `ANDROID_HOME` in the environment.** There is
 no `local.properties` there, so `settings.gradle.kts` drops `:app` and Gradle
@@ -64,31 +76,34 @@ being silently ignored is the symptom.
 
 ---
 
-## The rejectSigma ceiling is measured, as of 9 September
+## The rejectSigma threshold is measured at both ends, as of 9 September
 
-`MAX_SIGMA` is **0.15**, down from a guessed 0.60. `SIGMA_PER_NOISE` stays at
-6.5. Two bursts of one scene, one static and one with a hand moving through
-frame, replayed at fourteen thresholds each; the numbers and the reasoning are
-in `docs/SESSION-LOG.md`. The short version:
+`MAX_SIGMA` is **0.15**, down from a guessed 0.60. `MIN_SIGMA` stays at 0.06
+and `SIGMA_PER_NOISE` at 6.5, both now tested rather than assumed. Fourteen
+bursts across ISO 25 to 1047, indoor and rooftop; the numbers are in
+`docs/SESSION-LOG.md`. The short version:
 
-- Noise reduction is **finished by about 0.12**. From there to 1.00 it improves
-  by 0.02 of an 8-bit level.
-- A **moving subject starts ghosting at 0.15** - a translucent contour of the
-  subject on plain background, clean at 0.12 and unmistakable at 0.20.
-- A **static scene ghosts too, at about 0.40**, where residual misalignment
+- **Noise reduction is finished by 0.06 to 0.12**, in every burst measured.
+  Above that it improves by hundredths of an 8-bit level.
+- **The ghosting onset tracks alignment residual, not noise.** 28 px of corner
+  shift ghosts at about 0.40; 177 px at about 0.25; 253 px with a hand crossing
+  frame at **0.15**. A moving subject is what binds, as it should be - it is the
+  only case where the disagreement is signal rather than error.
+- **A static scene ghosts too**, at about 0.40, where residual misalignment
   doubles high-contrast edges. Nothing in frame moved. Rejection was the only
   thing hiding it.
 
-That last point is worth carrying, because the 8 September entry reasoned that
-a static scene cannot ghost and therefore cannot calibrate the ceiling. It can;
-the metric in use could not see it. Whole-frame noise is precisely the quantity
-a looser threshold always improves, so it cannot express what one costs.
+That last point cost the 8 September session its answer - it reasoned that a
+still room cannot calibrate this. It can; whole-frame noise is precisely the
+quantity a looser threshold always improves, so it cannot express what one
+costs.
 
-The remaining soft spot is that all of this sits at one gain, ISO 322-376. The
-onset lands near eleven times the frame's measured noise and the noise floor
-near nine times it, so 6.5 keeps roughly a 1.7x margin - but whether the onset
-*scales* with noise, rather than sitting at a fixed 0.15, is untested. A
-daylight burst and a very dark one would settle it.
+**This raises the stakes on optical refinement.** If the ceiling is a
+consequence of alignment error, refinement does not merely sharpen the output -
+it raises the ceiling, and buys back the noise reduction the ceiling forgoes.
+
+The open question is whether the onset *scales* with noise or is fixed. See
+"Do this first" for why the bright end cannot answer it.
 
 ---
 

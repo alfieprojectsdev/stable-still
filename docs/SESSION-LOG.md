@@ -8,6 +8,94 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-09 (later) - daylight, and a noise estimator that returned zero
+
+Nine rooftop bursts at ISO 25-64, from a phone on mobile data over Tailscale
+with the laptop indoors. The ceiling set earlier today survives; a prediction
+made alongside it does not; and a defect turned up that had nothing to do with
+either.
+
+### estimateNoise returned exactly zero on three of nine real bursts
+
+Auto-exposure held 20 ms outdoors in three bursts, blowing out **52-73% of
+their pixels**. The 25th-percentile tile then landed *inside* the clipped
+region, where variance is zero because the sensor ran out of range rather than
+because the scene is quiet, and the function returned 0.0000. Threshold falls
+to `MIN_SIGMA`, stacking quietly stops doing much, and nothing says so.
+
+The doc comment claimed this was handled - "not the minimum, though: a clipped
+black region has no variance at all". A percentile only survives while the
+clipped fraction stays *below* the percentile. At 70% it does not.
+
+Fixed by dropping tiles that are more than half clipped before taking the
+percentile. On the three real bursts, 0.0000 becomes 0.0028, 0.0051 and 0.0150;
+the six unclipped bursts do not move. A frame clipped everywhere still returns
+zero, which is the honest answer.
+
+| burst | clipped | noise before | after |
+|---|---|---|---|
+| 113149 | 70.7% | 0.0000 | 0.0028 |
+| 113401 | 73.3% | 0.0000 | 0.0051 |
+| 113412 | 51.8% | 0.0000 | 0.0150 |
+| the other six | 0-0.3% | unchanged | unchanged |
+
+### The ceiling holds, and the mechanism is alignment residual
+
+Noise reduction finishes early in every burst measured, at 0.06 to 0.12, and
+the ghosting onset moves with **how far the frame had to be warped** rather
+than with gain:
+
+| burst | shift | noise | ghosting onset |
+|---|---|---|---|
+| daylight document, 8 MP | 28 px | 0.0097 | ~0.40, clear by 0.60 |
+| daylight document, 12.5 MP | 177 px | 0.0102 | ~0.25-0.40 |
+| indoor static | - | 0.0128 | ~0.40 |
+| indoor, hand crossing frame | 253 px | 0.0136 | **0.15** |
+
+`MAX_SIGMA = 0.15` sits below every onset and above every knee. Nothing here
+argues for moving it, and the moving subject remains what binds - as it should,
+since it is the only case where the disagreement is real signal rather than
+residual error.
+
+That the onset tracks residual and not noise is the more useful half. It says
+optical refinement would not merely sharpen the output, it would *raise the
+ceiling*, because the ceiling is a consequence of alignment error.
+
+### A prediction that did not survive
+
+Yesterday's reasoning said daylight would drive measured noise to about 0.005,
+the 6.5x rule to 0.033, and therefore pin the threshold at `MIN_SIGMA = 0.06` -
+while an onset scaling at 11x noise would sit at 0.055, *below* that floor,
+indicting the floor. Wrong twice over:
+
+- Measured noise in daylight is **0.0069 to 0.0102**, not 0.005. On a real
+  textured scene the estimator is limited by scene texture, not by the sensor:
+  ISO 25 through ISO 376 all report 0.009-0.014, a range far narrower than
+  their gain. It resolves high noise, not low.
+- At the lowest usable figure, 0.0069, a sweep through 0.03 / 0.06 / 0.09 shows
+  a clean image at 0.06. The floor is not causing ghosting.
+
+So `MIN_SIGMA` stands. The scaling question - does the onset move with noise or
+sit at a fixed value - is **still open**, but for a different reason than
+expected: not that it was answered, but that the estimator cannot resolve a
+gain change large enough to ask. Settling it needs the high-noise end, a dark
+indoor burst with a moving subject, not a brighter one.
+
+### Incidental
+
+- Two bursts carry the app's own warning that exposure varied across the burst
+  (113216, 113326). Worth avoiding when a burst is being used as evidence.
+- `am start` for the next replay races the previous activity's `finish()`, and
+  the new intent lands on an activity already tearing down:
+  `JobCancellationException: Job was cancelled`. Five of nine replays failed
+  this way before a settle delay was added between them. It is a harness
+  problem, not a pipeline one, but it fails in a way that looks like a crash.
+- The 12.5 MP and 8 MP daylight pairs needed for the 20-vs-30 fps trade now
+  exist and are unexamined.
+- Test count 59 to 61.
+
+---
+
 ## 2026-09-09 - the rejectSigma ceiling, measured
 
 Two bursts of the same scene - a hand over a laptop on a desk, ISO 322-376 -

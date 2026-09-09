@@ -100,4 +100,35 @@ class NoiseModelTest {
         val sigma = NoiseModel.sigmaFor(2.5 / 255.0)
         assertTrue("Daylight mapped to $sigma", sigma in NoiseModel.MIN_SIGMA..0.12f)
     }
+
+    @Test
+    fun `a blown-out frame is measured on the part that is not clipped`() {
+        // Three of nine rooftop bursts came back 52-73% clipped, because
+        // auto-exposure held 20 ms in daylight. Taking a percentile rather than
+        // the minimum does not survive that: once the clipped fraction passes
+        // the percentile, the 25th-ranked tile is itself clipped and the frame
+        // reports no noise at all.
+        val rng = Random(11)
+        val target = 6.0
+        val blown = plane(1200, 600) { x, _ ->
+            // 70% of the width at full white, the rest a normal noisy mid-grey.
+            if (x < 840) 255 else {
+                val g = (0 until 12).sumOf { rng.nextDouble() } - 6.0
+                (128 + g * target).toInt()
+            }
+        }
+        val measured = NoiseModel.estimateNoise(blown) * 255.0
+        assertEquals("Blown-out frame measured $measured", target, measured, target * 0.4)
+        assertTrue("Threshold collapsed to the floor", NoiseModel.sigmaFor(blown) > NoiseModel.MIN_SIGMA)
+    }
+
+    @Test
+    fun `a frame clipped everywhere reports nothing and falls back to the anchor`() {
+        // Not a failure to handle - there is genuinely nothing left to measure.
+        // MIN_SIGMA is the right answer: contribute the anchor and little else,
+        // rather than average pixels whose true values the sensor never saw.
+        val white = plane(600, 600) { _, _ -> 255 }
+        assertEquals(0.0, NoiseModel.estimateNoise(white), 1e-9)
+        assertEquals(NoiseModel.MIN_SIGMA, NoiseModel.sigmaFor(white), 1e-6f)
+    }
 }
