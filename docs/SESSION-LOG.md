@@ -8,6 +8,94 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-09 - the rejectSigma ceiling, measured
+
+Two bursts of the same scene - a hand over a laptop on a desk, ISO 322-376 -
+one static, one with the hand moving through frame. Each replayed at fourteen
+thresholds from 0.01 to 1.00. `MAX_SIGMA` drops from **0.60 to 0.15**.
+`SIGMA_PER_NOISE` stays at 6.5; measurement bracketed it rather than moved it.
+
+### Why the last sweep could not see this
+
+It scored whole frames on noise. Noise is exactly the quantity a looser
+threshold always improves, so the metric had no way to express the cost it was
+buying. Two changes made the knee visible:
+
+- **A reference that isolates the merge.** Replaying at sigma 0.01 underflows
+  every non-anchor weight, so the output is the anchor alone - through the same
+  warp, the same crop and the same JPEG encoder as every other threshold.
+  Differences against it are what the merge did, with no resampling or encoding
+  artefact to argue about.
+- **Measuring noise in the static region only, and then looking at the
+  pictures.** The scalar located the knee; the crops confirmed what it was.
+
+### The knee, and it is a real one
+
+Residual noise in static regions, 25th-percentile tile deviation, 8-bit levels:
+
+| sigma | 0.01 | 0.03 | 0.06 | 0.09 | 0.12 | 0.15 | 0.20 | 0.30 | 0.40 | 0.60 | 1.00 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| static burst | 2.52 | 1.87 | 1.27 | 1.15 | 1.10 | 1.09 | 1.10 | 1.09 | 1.09 | 1.08 | 1.08 |
+| motion burst | 2.71 | 2.49 | 1.78 | 1.44 | 1.30 | 1.25 | 1.18 | 1.17 | 1.14 | 1.14 | 1.13 |
+
+**Noise reduction is finished by about 0.12.** From there to 1.00 - a factor of
+eight in threshold - it improves by 0.02 levels, which is nothing. Everything
+above that point is bought with ghosting and paid for with no noise at all.
+
+### Where ghosting starts, by eye at 1:1
+
+Two ceilings, and the tighter one binds:
+
+| | onset | what it looks like |
+|---|---|---|
+| **Moving subject** | **0.15** | A translucent contour of the fingertip appears on plain background. Clean at 0.12, faint at 0.15, unmistakable at 0.20, a full second finger by 1.00. |
+| **Static scene** | ~0.40 | High-contrast edges double. The ThinkPad logo is sharp through 0.30, visibly doubled at 0.40, badly ghosted at 1.00. |
+
+The static number is the more surprising of the two, because it says a static
+scene ghosts as well - just later. Nothing in frame moved; what doubles is
+residual misalignment, and rejection was the only thing hiding it. So "with
+nothing moving, a looser threshold is always better", which the 8 September
+entry offered as the reason its sweep was degenerate, is only true of the
+metric that sweep used.
+
+### What that makes of 6.5
+
+The onset sits at 0.15 against a measured noise of 0.0136, so ghosting begins
+near **eleven times** the per-channel noise, and noise reduction stops
+improving near **nine times** it. The derived 6.5 sits below both, with about a
+1.7x margin to the onset, and gives up a few percent of the available noise
+reduction to keep it. Left alone: the measurement covers one gain, and the
+margin is what covers the rest.
+
+The clamp now binds where it should. The ISO 1047 archive burst measures 0.0250
+and the rule alone would take it to 0.162, past the onset; it is held at 0.150,
+which that burst's own sweep says costs 1.92x noise reduction against 1.96x.
+
+### Caveat worth carrying
+
+The motion burst also had a **253 px** max corner shift - a quarter of the crop
+budget, against 10.4 mrad for the steady burst - at roughly 30 cm subject
+distance. Translation parallax at that range displaces the static background
+too, which is why its whole-frame disagreement map lights up everywhere and why
+the moving region could not be isolated by a scalar alone. It does not weaken
+the ceiling, which was read off crops at 1:1, but it means the 0.15 figure is a
+*conservative* onset: a burst with less camera translation might tolerate a
+little more. Nothing above 0.12 buys noise reduction anyway, so there is no
+reason to go looking.
+
+### Also
+
+- `--es burst <directoryName>` now selects which burst `autoReplay` stacks.
+  "Newest" stopped being a fixed input the moment a control burst existed.
+- `./gradlew :app:...` from a worktree needs `ANDROID_HOME` in the environment.
+  The worktree has no `local.properties`, so `settings.gradle.kts` drops `:app`
+  and Gradle reports it as a task that does not exist - which reads as a typo
+  rather than a missing SDK. An install can appear to succeed while the old APK
+  stays on the phone; new intent extras being ignored is the symptom.
+- Test count 57 to 59.
+
+---
+
 ## 2026-09-08 (later) - rejectSigma derived from measured noise
 
 `rejectSigma` was a constant. It is now derived from the anchor frame's own

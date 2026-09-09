@@ -58,19 +58,38 @@ class NoiseModelTest {
     }
 
     @Test
-    fun `the A07's measured noise floor maps to a threshold well above the old constant`() {
-        // 0.0250 is what estimateNoise actually reports for the ISO 1047 burst
-        // in the test fixture - not the 9.87/255 quoted elsewhere, which came
-        // from a mean over tiles rather than this percentile and is a different
-        // statistic entirely.
+    fun `the A07's low-ISO noise maps below the measured ghosting ceiling`() {
+        // 0.0136 is what estimateNoise reports for the burst that pinned the
+        // ceiling - a hand crossing frame at ISO 322-376. Ghosting became
+        // visible in that burst at 0.15, so the derived threshold has to land
+        // meaningfully under it or the model recommends the very setting the
+        // measurement rules out.
+        val sigma = NoiseModel.sigmaFor(0.0136)
+        assertTrue("Derived $sigma is not below the 0.15 ghosting onset", sigma < 0.15f)
+        assertTrue("Derived $sigma gives up the noise reduction", sigma > 0.08f)
+    }
+
+    @Test
+    fun `the ceiling sits at the measured ghosting onset, not above it`() {
+        // The number itself, pinned. A hand-crossing burst was replayed across
+        // fourteen thresholds: clean at 0.12, a faint ghost contour at 0.15,
+        // unmistakable at 0.20. Residual noise in static regions had already
+        // stopped improving by 0.12, so nothing above this buys anything.
         //
-        // The bar here is loose on purpose. The sweep that would pin it down
-        // was degenerate: against a static scene noise falls monotonically to
-        // the clamp, so there is no measured ceiling to assert against. All
-        // this checks is that a real high-ISO frame lands meaningfully above
-        // the 0.10 constant it replaces, and short of the clamp.
-        val sigma = NoiseModel.sigmaFor(0.0250)
-        assertTrue("A07 noise mapped to $sigma", sigma > 0.12f && sigma < NoiseModel.MAX_SIGMA)
+        // If this fails because someone raised the clamp, the burst to re-run
+        // is in docs/SESSION-LOG.md - do not raise it on a static scene alone,
+        // which is what made the first attempt at this number degenerate.
+        assertEquals(0.15f, NoiseModel.MAX_SIGMA, 1e-6f)
+        assertEquals(NoiseModel.MAX_SIGMA, NoiseModel.sigmaFor(1.0), 1e-6f)
+    }
+
+    @Test
+    fun `a high-ISO frame is held at the ceiling rather than allowed to ghost`() {
+        // The ISO 1047 archive burst measures 0.0250, which the 6.5x rule alone
+        // would take to 0.162 - past the onset. The clamp is what stops it, and
+        // it costs almost nothing: that burst's own sweep recovered 1.92x noise
+        // reduction at 0.15 against 1.96x at 0.16.
+        assertEquals(NoiseModel.MAX_SIGMA, NoiseModel.sigmaFor(0.0250), 1e-6f)
     }
 
     @Test

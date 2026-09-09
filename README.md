@@ -58,9 +58,9 @@ test suite stays runnable in CI and on any machine.
 | Phase | What | State |
 |---|---|---|
 | 0 | Device probe - what can this phone actually do? | Implemented |
-| 1 | Ring-buffer capture + gyro recording | Implemented, untested on device |
-| 2 | Motion maths (integration, homography, anchors) | Implemented, 38 unit tests passing |
-| 3 | GPU warp + ghost-rejecting merge | Implemented, untested on device |
+| 1 | Ring-buffer capture + gyro recording | Runs on device; bursts saved and replayed |
+| 2 | Motion maths (integration, homography, anchors) | Implemented, 59 unit tests passing |
+| 3 | GPU warp + ghost-rejecting merge | Runs on device; rejection threshold measured |
 | 4 | Clock-sync auto-calibration + optical refinement | Scaffolded, not implemented |
 | 5 | UX, presets, long-exposure mode | Not started |
 

@@ -12,9 +12,12 @@ import kotlin.math.sqrt
  * fixed threshold rejects genuine agreement exactly when there is most noise to
  * average away - which is precisely when stacking is worth doing.
  *
- * Measured on the A07 at ISO 1047: a threshold of 0.10 recovered 1.69x noise
- * reduction from eight frames, where 0.40 recovered 3.0x against an ideal of
- * sqrt(8) = 2.83.
+ * Both ends are now measured. On the A07 at ISO 322-376, where the frame's own
+ * noise reads 0.013, residual noise in static regions stops falling at a
+ * threshold near 0.12 - roughly nine times that figure - while a moving subject
+ * starts leaving a visible ghost at 0.15. There is nothing to buy above the
+ * lower of the two and something real to lose, which is what [MAX_SIGMA]
+ * encodes.
  */
 object NoiseModel {
 
@@ -32,13 +35,14 @@ object NoiseModel {
      * than luma at high gain and the shader compares in RGB, so if anything
      * this errs tight.
      *
-     * It was *not* fitted to the threshold sweep, because that sweep cannot
-     * settle it: run against a static scene, noise reduction improves
-     * monotonically all the way to the clamp, since nothing in frame can ghost.
-     * Fitting to that data would drive the threshold to its maximum and buy a
-     * ghosting regression on the first moving subject. Setting the ceiling
-     * needs a burst with motion in it, which has not been captured. The sweep
-     * numbers are in `docs/SESSION-LOG.md`.
+     * Measurement has since bracketed it rather than replaced it. Against a
+     * burst with a hand moving through frame, ghosting became visible at about
+     * eleven times the measured noise, and noise reduction had stopped
+     * improving by about nine times it. Six and a half sits below both, keeping
+     * roughly a 1.7x margin to the ghosting onset at the cost of a few percent
+     * of the available noise reduction - a trade worth making, since the
+     * measurement exists at one gain only and the margin is what covers the
+     * others.
      */
     const val SIGMA_PER_NOISE = 6.5
 
@@ -51,8 +55,22 @@ object NoiseModel {
     /**
      * Beyond this, the threshold admits genuinely different pixels and moving
      * subjects ghost instead of falling back to the anchor.
+     *
+     * Measured, not chosen. A burst with a hand crossing the frame was replayed
+     * across fourteen thresholds and the moving region inspected at 1:1: the
+     * background is clean at 0.12, carries a faint translucent contour of the
+     * finger at 0.15, and shows it unmistakably at 0.20. A static burst of the
+     * same scene puts its own ceiling far higher, around 0.40, where residual
+     * misalignment starts doubling high-contrast edges - so the moving subject
+     * is what binds.
+     *
+     * Nothing is given up by stopping here. Residual noise in static regions
+     * flattens out at 0.12 and does not improve measurably through 1.00, so
+     * every threshold above this ceiling buys ghosting and no noise reduction.
+     * That knee was invisible to the earlier sweep, which scored whole frames
+     * on noise alone and therefore could not see a cost it does not measure.
      */
-    const val MAX_SIGMA = 0.60f
+    const val MAX_SIGMA = 0.15f
 
     /**
      * Rejection threshold for a frame whose per-channel noise is [noise],

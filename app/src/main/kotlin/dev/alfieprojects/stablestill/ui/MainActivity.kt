@@ -52,7 +52,8 @@ class MainActivity : ComponentActivity() {
     ) { granted -> hasCameraPermission = granted }
 
     /**
-     * Stacks the newest saved burst and logs the result, then finishes.
+     * Stacks a saved burst and logs the result, then finishes. The newest,
+     * unless `--es burst <directoryName>` names another.
      *
      * `adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
      *     --ez autoReplay true`
@@ -68,7 +69,7 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) {
                     BurstReplayer(File(getExternalFilesDir(null), "captures"))
                         .replay(
-                            BurstCaptureController(this@MainActivity).savedBursts().first(),
+                            selectBurst(intent.getStringExtra("burst")),
                             rejectSigma = intent.getStringExtra("rejectSigma")?.toFloatOrNull(),
                         )
                 }
@@ -84,6 +85,21 @@ class MainActivity : ComponentActivity() {
             }.onFailure { Log.e(AUTO_REPLAY_TAG, "FAILED: ${it.stackTraceToString()}") }
             finish()
         }
+    }
+
+    /**
+     * The burst [name] asks for, or the newest if it asks for none.
+     *
+     * A threshold sweep has to hold the input still while the threshold moves,
+     * and "newest" stops being a fixed input the moment another burst is
+     * captured - including the control burst the sweep is compared against.
+     */
+    private fun selectBurst(name: String?): File {
+        val saved = BurstCaptureController(this).savedBursts()
+        check(saved.isNotEmpty()) { "No saved bursts to replay" }
+        if (name == null) return saved.first()
+        return saved.firstOrNull { it.name == name }
+            ?: error("No burst named $name - have ${saved.map { it.name }}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

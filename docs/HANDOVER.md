@@ -3,10 +3,11 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 8 September 2026.
+Updated 9 September 2026.
 
-Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. What is
-left is tuning them against light and motion that has not been captured yet.
+Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. The
+merge's rejection threshold is now measured at both ends. What is left is
+tuning the rest against light that has not been captured yet.
 
 ---
 
@@ -16,8 +17,8 @@ left is tuning them against light and motion that has not been captured yet.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **57 unit tests passing**, including a real-burst replay. |
-| 3 | GPU warp + merge | **Runs. Replays a saved burst; threshold now derived from noise.** |
+| 2 | Motion maths | **59 unit tests passing**, including a real-burst replay. |
+| 3 | GPU warp + merge | **Runs. Replays a saved burst; threshold derived from noise, ceiling measured against motion.** |
 | 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
 | 5 | Product UX | Not started. |
 
@@ -33,27 +34,13 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Capture a burst with something moving in it.**
+**Capture a daylight burst, at both resolutions.**
 
-Everything in the archive is a still room, and that is now the binding
-constraint rather than a gap worth noting. `rejectSigma` is derived from
-measured noise as of 8 September, but only its lower half is evidence: the
-threshold sweep meant to set the ceiling was degenerate, because against a
-static scene noise reduction improves monotonically to the clamp and rejection
-has nothing to earn its keep against. `SIGMA_PER_NOISE = 6.5` is derived from
-the Maxwell distribution of a three-channel noise difference, not fitted, and
-it will stay a guess until a burst exists that can ghost.
-
-Anything moving will do: a person crossing frame, a hand waved through it,
-traffic. Then replay it at several thresholds and find where ghosting starts -
-that upper bound is the missing number.
-
-Two more capture errands, neither blocking:
-
-- **Daylight, both resolutions.** The 20-vs-30 fps trade in
-  `docs/DEVICE-A07.md` cannot be settled against ISO 1047 frames, where noise
-  dominates whatever the frame span contributes.
-- **A deliberately shaky burst**, for the crop question below.
+The threshold work is finished - see below - and this is what is left that
+needs a finger. The 20-vs-30 fps trade in `docs/DEVICE-A07.md` cannot be
+settled against ISO 1047 frames, where noise dominates whatever the frame span
+contributes. A deliberately shaky burst is the other one worth having, for the
+crop question further down.
 
 On the phone: **Capture** tab, depth **8**, max exposure **20 ms**.
 `adb shell input tap` does not work on this handset, so capture needs a finger.
@@ -61,25 +48,64 @@ Replaying afterwards does not:
 
 ```
 adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
-    --ez autoReplay true --es rejectSigma 0.40
+    --ez autoReplay true --es burst burst-20260909-085849 --es rejectSigma 0.40
 ```
 
-Omit `rejectSigma` to use the derived one. Results land under the `AutoReplay`
-logcat tag, and the output JPEG is named after the threshold that produced it.
+Omit `rejectSigma` to use the derived one, and `burst` to take the newest.
+Results land under the `AutoReplay` logcat tag, and the output JPEG is named
+after the threshold that produced it, so a sweep runs in one loop and is pulled
+in one go.
+
+**From a worktree, `:app` needs `ANDROID_HOME` in the environment.** There is
+no `local.properties` there, so `settings.gradle.kts` drops `:app` and Gradle
+says the task does not exist - which reads as a typo. Worse, an install can
+look like it succeeded while the old APK stays on the phone; new intent extras
+being silently ignored is the symptom.
+
+---
+
+## The rejectSigma ceiling is measured, as of 9 September
+
+`MAX_SIGMA` is **0.15**, down from a guessed 0.60. `SIGMA_PER_NOISE` stays at
+6.5. Two bursts of one scene, one static and one with a hand moving through
+frame, replayed at fourteen thresholds each; the numbers and the reasoning are
+in `docs/SESSION-LOG.md`. The short version:
+
+- Noise reduction is **finished by about 0.12**. From there to 1.00 it improves
+  by 0.02 of an 8-bit level.
+- A **moving subject starts ghosting at 0.15** - a translucent contour of the
+  subject on plain background, clean at 0.12 and unmistakable at 0.20.
+- A **static scene ghosts too, at about 0.40**, where residual misalignment
+  doubles high-contrast edges. Nothing in frame moved. Rejection was the only
+  thing hiding it.
+
+That last point is worth carrying, because the 8 September entry reasoned that
+a static scene cannot ghost and therefore cannot calibrate the ceiling. It can;
+the metric in use could not see it. Whole-frame noise is precisely the quantity
+a looser threshold always improves, so it cannot express what one costs.
+
+The remaining soft spot is that all of this sits at one gain, ISO 322-376. The
+onset lands near eleven times the frame's measured noise and the noise floor
+near nine times it, so 6.5 keeps roughly a 1.7x margin - but whether the onset
+*scales* with noise, rather than sitting at a fixed 0.15, is untested. A
+daylight burst and a very dark one would settle it.
 
 ---
 
 ## Open question the reader can now answer cheaply
 
-**The 12% crop margin may be far too generous.** Replaying the one capped
-burst: worst rotation 10.4 mrad against a budget of 118 mrad, so 9% of the
-margin was used. A 12% margin per side costs 38% of the pixel count, which is a
-lot of resolution to spend on headroom nobody touched.
+**The 12% crop margin may be far too generous - but less obviously so than it
+looked.** Replaying the one capped burst: worst rotation 10.4 mrad against a
+budget of 118 mrad, so 9% of the margin was used. A 12% margin per side costs
+38% of the pixel count, which is a lot of resolution to spend on headroom
+nobody touched.
 
-One steady indoor burst is not grounds for changing the default - a tremor is
-precisely the case that would use the margin, and none has been captured. But
-`BurstReplayTest` makes the question a matter of replaying a handful of bursts
-rather than arguing.
+The motion burst of 9 September is the first counter-example: **253 px of max
+corner shift**, about a quarter of the 490 px budget, from ordinary handheld
+movement over 350 ms. Still well inside, but a factor of twenty-five above the
+steady burst, so the margin is not headroom nobody touches - it is headroom
+nobody has yet exhausted. `BurstReplayTest` makes the rest of the question a
+matter of replaying a handful of bursts rather than arguing.
 
 ---
 
@@ -113,8 +139,12 @@ pages in a library, legibly, for citation and annotation. Raised 5 September
 
 Why it suits this design better than general photography:
 
-- The subject is **flat and static**, so the merge's rejection logic has
-  nothing to reject and every frame contributes fully. No ghosting case exists.
+- The subject is **flat and static**, so almost every frame contributes almost
+  everywhere. Not quite "no ghosting case exists", which is what this said
+  before 9 September: a static scene does ghost once the threshold passes about
+  0.40, because residual misalignment doubles high-contrast edges and rejection
+  was the only thing hiding it. On 8-point type that is the failure mode to
+  watch, and it is the same argument for optical refinement made below.
 - Libraries are dim and flash is usually banned or useless on glossy paper,
   which forces high ISO - and noise is what stacking removes.
 - Text is the ideal thing to sharpen, and legibility is pass/fail rather than
