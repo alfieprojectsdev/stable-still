@@ -71,7 +71,7 @@ object BurstAligner {
             val sampling = h * crop.outputToAnchor
 
             val shift = maxCornerShift(sampling, crop)
-            val inBounds = cornersInside(sampling, crop, frame)
+            val inBounds = cornersInside(sampling, crop, frame.width, frame.height)
             val angle = deviceRotation.angle()
 
             FrameAlignment(
@@ -92,7 +92,15 @@ object BurstAligner {
         (crop.outputWidth - 1).toDouble() to (crop.outputHeight - 1).toDouble(),
     )
 
-    private fun maxCornerShift(sampling: Mat3, crop: CropWindow): Double {
+    /**
+     * Worst-case corner displacement, in source pixels, against the unrotated
+     * crop.
+     *
+     * Public because a refined sampling matrix has to be re-scored: an
+     * alignment carrying the diagnostics of the matrix it replaced would
+     * misreport exactly the case refinement exists to change.
+     */
+    fun maxCornerShift(sampling: Mat3, crop: CropWindow): Double {
         var worst = 0.0
         for ((u, v) in outputCorners(crop)) {
             val mapped = sampling.mapPoint(u, v) ?: return Double.MAX_VALUE
@@ -105,11 +113,12 @@ object BurstAligner {
         return worst
     }
 
-    private fun cornersInside(sampling: Mat3, crop: CropWindow, frame: FrameMeta): Boolean {
+    /** Whether every corner of the crop still lands on the sensor. */
+    fun cornersInside(sampling: Mat3, crop: CropWindow, width: Int, height: Int): Boolean {
         for ((u, v) in outputCorners(crop)) {
             val mapped = sampling.mapPoint(u, v) ?: return false
-            if (mapped.first < 0.0 || mapped.first > frame.width - 1.0) return false
-            if (mapped.second < 0.0 || mapped.second > frame.height - 1.0) return false
+            if (mapped.first < 0.0 || mapped.first > width - 1.0) return false
+            if (mapped.second < 0.0 || mapped.second > height - 1.0) return false
         }
         return true
     }

@@ -95,6 +95,52 @@ class LumaPlane(val width: Int, val height: Int, val pixels: ByteArray) {
 
     operator fun get(x: Int, y: Int): Int = pixels[y * width + x].toInt() and 0xFF
 
+    /**
+     * Bilinear tap at a continuous pixel coordinate, on the 0..1 range.
+     *
+     * The convention matches the shaders and [YuvFrame]: pixel `i` has its
+     * centre at `i + 0.5`, so a coordinate landing on a whole number sits on the
+     * boundary between two pixels and returns their mean. Taps outside the plane
+     * are clamped to the edge.
+     */
+    fun sample(cx: Double, cy: Double): Double {
+        val tx = cx - 0.5
+        val ty = cy - 0.5
+        val x0 = kotlin.math.floor(tx).toInt()
+        val y0 = kotlin.math.floor(ty).toInt()
+        val fx = tx - x0
+        val fy = ty - y0
+        val xa = x0.coerceIn(0, width - 1)
+        val xb = (x0 + 1).coerceIn(0, width - 1)
+        val ya = y0.coerceIn(0, height - 1)
+        val yb = (y0 + 1).coerceIn(0, height - 1)
+        val top = this[xa, ya] + (this[xb, ya] - this[xa, ya]) * fx
+        val bottom = this[xa, yb] + (this[xb, yb] - this[xa, yb]) * fx
+        return (top + (bottom - top) * fy) / 255.0
+    }
+
+    /**
+     * Half-resolution copy, by 2x2 box average.
+     *
+     * The averaging is not decoration: dropping alternate pixels aliases sensor
+     * noise straight into the coarse level, and a refinement searching there
+     * would be matching noise rather than structure.
+     */
+    fun downsample(): LumaPlane {
+        val w = width / 2
+        val h = height / 2
+        require(w >= 1 && h >= 1) { "Cannot halve a ${width}x$height plane" }
+        val out = ByteArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val sum = this[2 * x, 2 * y] + this[2 * x + 1, 2 * y] +
+                    this[2 * x, 2 * y + 1] + this[2 * x + 1, 2 * y + 1]
+                out[y * w + x] = ((sum + 2) / 4).toByte()
+            }
+        }
+        return LumaPlane(w, h, out)
+    }
+
     val meanLuma: Double
         get() {
             var sum = 0L
