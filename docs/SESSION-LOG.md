@@ -8,6 +8,188 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-16 (fourth) - the phone comes out of the loop
+
+No hardware this session, and no burst pixels either: the 3.3 GB of archives
+were still on the far end of a 1 MB/s tailnet, so everything here was built and
+tested against the metadata fixture and against synthetic bursts whose answers
+are known by construction. That constraint turned out to set a good agenda,
+because the thing most worth building was the thing that removes the phone from
+the loop.
+
+### The merge now runs on a JVM
+
+`ReferenceMerge` is the shaders' three passes in `:core`: warp, weight, resolve.
+It is written to *match* `StackRenderer`, not to improve on it, and the awkward
+parts are the point - the half-texel offset GLSL bakes into `texture()`, the
+anchor quantised to eight bits before any difference is measured against it, the
+bounds guard that drops a contribution where clamping would smear an edge pixel
+across the output. The single intended divergence is precision: the GPU
+accumulates into `RGBA16F` where the extension is present, this accumulates in
+single precision, so a disagreement of a level or two is that and a disagreement
+of ten is a bug in one of the two.
+
+What it was for is `ThresholdSweep`. Separating the benefit from the cost needs
+one threshold-independent pass - how far the most dissenting frame sits from the
+anchor - after which a departure from the anchor where that is large is a ghost
+and the same departure elsewhere is noise being averaged away. The sweep
+therefore reports the trade rather than a number someone still has to interpret,
+and the 9 September finding is now a test rather than an afternoon:
+
+|  sigma | eff. frames | residual noise | ghost (levels) |
+|---|---|---|---|
+| 0.05 | 3.96 | 0.01571 | 0.00 |
+| 0.10 | 5.38 | 0.01010 | 0.00 |
+| **0.15** | **5.96** | **0.00874** | **0.00** |
+| 0.30 | 6.46 | 0.00814 | 5.49 |
+| 0.60 | 6.97 | 0.00827 | 65.60 |
+| 1.00 | 7.48 | 0.00832 | 81.46 |
+
+Synthetic, so the numbers are not the device's. The *shape* is the claim, and it
+is the shape measured on hardware: noise stops improving around 0.15-0.30 and
+ghosting is still climbing at 1.00. Everything above the knee buys a ghost and
+nothing else.
+
+### Optical refinement, and two things the tests decided
+
+`OpticalRefinement` is Lucas-Kanade on a luma pyramid, estimating a
+**translation** - the term a gyroscope structurally cannot see and the one
+parallax at close range produces. Rotation the gyro already has to milliradians
+from a 403 Hz trace, and two parameters stay conditioned on the texture a real
+scene offers where eight would fit noise.
+
+Plain LK rather than ECC, for a reason specific to this capture path: ECC buys
+invariance to illumination change between frames, and the exposure cap holds
+exposure and gain fixed for the whole burst, so there is nothing to be invariant
+to.
+
+Two things came out of testing rather than out of design:
+
+- **The normal equations need damping.** A scene textured one way only - a
+  horizon, a window frame, ruled lines on a page - is singular in the
+  perpendicular direction *alone*. The first implementation checked the
+  determinant and refused the whole step, which throws away the direction that
+  is perfectly observable. Damped, the observable direction comes back intact
+  and the unobservable one is pulled to zero, which is the honest answer for a
+  shift nothing in the frame constrains.
+- **Four pyramid levels is not a round number.** It is what reaches the 10-30 px
+  the page-at-30 cm case predicts. Measured across the range, with four levels
+  the recovery is exact; with two, it converges, *reports* convergence, and
+  settles a whole period of the scene's finest texture away from the truth. A
+  refiner that is confidently wrong is worse than one that declines, so this is
+  not a default to trim later without re-measuring.
+
+And the claim that refinement raises the *threshold's* ceiling rather than only
+sharpening the picture is now a test: four frames of a static scene displaced by
+a few pixels each stack 2.2 of 4 at sigma 0.15 before refinement and 4.0 after.
+Misalignment reads as disagreement, the merge rejects disagreement, and the
+rejected frames come back when the alignment is corrected.
+
+### Handedness can now be settled, and needs the right burst
+
+`RigCalibration.settleHandedness` warps a burst both ways and keeps whichever
+leaves the frames agreeing with the anchor. Tested against bursts *rendered*
+through a stated handedness, so there is a right answer to find: seeded with
+`+1` and shown a burst built the other way, it says so, by a margin over 100%
+rather than a few percent.
+
+**The burst has to have a tilt in it.** Handedness enters only through a
+rotation about the optical axis, by `handedness * SENSOR_ORIENTATION`, and
+rotations about that axis commute with it - so a burst that only *rolls* gives
+both signs identical homographies and can decide nothing. Pitch and yaw separate
+them. The verdict reports how far apart the two hypotheses place a crop corner
+and refuses to choose when that is sub-pixel, because the alternative is a coin
+toss recorded as a measurement, which would then travel in the manifest of every
+burst captured afterwards.
+
+### The crop margin is not as generous as it looked
+
+`BurstAudit` answers the crop, anchor and blur questions from timestamps and
+angular velocity alone, so it runs on an archive whose frame files never left
+the phone. `minimumSafeMargin` bisects for the smallest margin at which every
+frame still lands on the sensor - tighter than dividing the worst shift by the
+width, because a corner pushed *inwards* costs nothing and what binds is the
+signed excursion.
+
+On the fixture burst, which is the steady one:
+
+| | |
+|---|---|
+| Max corner shift | 43.1 px |
+| Max rotation | 10.4 mrad against a 117.9 mrad budget |
+| Slack used | 11.7% |
+| **Margin actually needed** | **1.13% per side, against 12% given** |
+
+Taken alone that says 12% is lavish, which is what the open question assumed.
+Taken with the shifts already recorded here it says the opposite. The motion
+burst of 9 September moved a corner 253 px and the two dim bursts about 350 px;
+against 4080 px of width that is 6.2% and 8.6%, and against 3060 px of height
+8.3% and **11.4%**. Which axis binds decides whether the worst burst on record
+sits comfortably inside 12% or almost exactly on it.
+
+So the answer is not "far too generous". It is **roughly right, possibly
+trimmable to 10%**, and the earlier suspicion was formed from the steadiest
+burst in the collection. Trimming to 10% would buy back 10.8% of the pixel
+count - `(1-2m)^2` is 0.64 against 0.578 - and still clear a 350 px x-axis
+excursion by 17%. It would *not* clear the same excursion on the y axis. The
+audit over all twenty-two bursts is what decides it, and is now a one-liner:
+
+```
+./gradlew :core:test --tests '*BurstAuditTest*' -Dstablestill.burstRoot=/path/to/bursts
+```
+
+### The anchor is a real choice, and its value is not where it looks
+
+On the fixture burst the selector picks **frame 1, not frame 0**, so it is not
+defaulting. It is 2.07x steadier than the average frame. But the per-frame
+steadiness scores show where that is actually worth something:
+
+| frame | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| rad/s | 0.0215 | **0.0214** | 0.0307 | 0.0495 | 0.0506 | 0.0344 | 0.0586 | 0.0890 |
+| blur px | 1.33 | **1.33** | 1.90 | 3.07 | 3.14 | 2.13 | 3.63 | 5.52 |
+
+Frames 0 and 1 are tied to within 0.15%, which is noise. **The choice between
+the top two is a coin toss; the value is entirely in avoiding frames 6 and 7**,
+where blur is four times the anchor's. That is worth knowing before anyone
+spends effort on a sharpness-based tie-break: at ISO 1047 a Laplacian score is
+inflated by noise, and it would be breaking a tie that does not matter.
+
+### The 20-vs-30 fps trade, as far as it goes without the pairs
+
+The daylight pairs are still unexamined, but the trade is now mostly decided by
+things already measured. 12.5 MP runs at 20 fps and 8 MP at 30 fps; eight frames
+therefore span 351 ms or 233 ms.
+
+- **Noise is neutral.** The 20 ms exposure cap sits below both frame intervals
+  (50.1 ms and 33.4 ms), so it binds at neither rate. Same exposure, same gain,
+  same per-frame noise, same stacking benefit for the same frame count.
+- **The shorter span buys alignment**, about a third less time for tremor to
+  accumulate - and the crop audit above says the margin is not binding in good
+  light, so in daylight that buys very little.
+- **It costs 36% of the pixels**, 8 MP against 12.5.
+- **The ISO ceiling is what actually decides it.** 12.5 MP caps at ISO 1047;
+  8 MP reaches 2425-3055. Past the cap, full resolution cannot expose the scene
+  at all, and no amount of stacking fixes an underexposed frame.
+
+So the rule is a light meter, not a preference: **stay at 12.5 MP / 20 fps while
+the metered ISO is under about 1000, and drop to 8 MP / 30 fps when the scene
+asks for more gain than that.** Below the cap the resolution is free; above it,
+the resolution is imaginary.
+
+The one case that could overturn this is document capture, where 8-point type
+wants every pixel and the parallax residual wants the shorter span. That one
+needs the page burst before anyone argues about it.
+
+### Not done, and why
+
+`:app` was not touched. There is no Android SDK in this environment, so
+`settings.gradle.kts` drops `:app` entirely and anything written there would
+have been pushed uncompiled. Wiring `OpticalRefinement` into `BurstReplayer` is
+the obvious next edit and is deliberately left for a session that can build it.
+
+---
+
 ## 2026-09-09 (third) - you cannot make a frame noisier by turning the lights off
 
 Eight dim indoor bursts, captured to settle whether the ghosting onset scales

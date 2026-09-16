@@ -3,11 +3,17 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 9 September 2026 (third session).
+Updated 16 September 2026 (fourth session).
 
 Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. The
-merge's rejection threshold is now measured at both ends. What is left is
-tuning the rest against light that has not been captured yet.
+merge's rejection threshold is measured at both ends. **Phase 4's maths now
+exists in `:core` and has never met the hardware** - optical refinement and
+handedness calibration are written and tested against bursts whose answers are
+known by construction, and neither has seen a real frame.
+
+The bigger change is that most of what is left no longer needs a phone. The
+merge runs on a JVM, so threshold sweeps, crop audits and alignment residuals
+are laptop work against archived bursts.
 
 ---
 
@@ -17,14 +23,26 @@ tuning the rest against light that has not been captured yet.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **61 unit tests passing**, including a real-burst replay. |
-| 3 | GPU warp + merge | **Runs. Replays a saved burst; threshold derived from noise, ceiling measured against motion.** |
-| 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement; refinement may be *required*, see below. |
+| 2 | Motion maths | **91 unit tests**, including a real-burst replay. |
+| 3 | GPU warp + merge | **Runs on device; also runs on the JVM.** Threshold derived from noise, ceiling measured against motion. |
+| 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement. Refinement and handedness calibration **built and unit-tested, not yet run on hardware or wired into `:app`**. |
 | 5 | Product UX | Not started. |
 
 `:app` now builds and runs on the A07. The warning that it had never been
 compiled no longer applies - it compiled on the first real attempt, with no
 Kotlin errors.
+
+### What `:core` can do without a phone
+
+Everything here runs on a laptop, against an archived burst or none at all.
+
+| Type | Answers |
+|---|---|
+| `ReferenceMerge` | The shaders' warp, weight and resolve, on the CPU. Matches `StackRenderer` deliberately, precision aside. |
+| `ThresholdSweep` | What each rejection threshold buys in noise and costs in ghosting, separated by a motion mask rather than by eye. |
+| `OpticalRefinement` | The translation the gyro cannot see, and the residual left before and after. |
+| `RigCalibration` | Which handedness the pixels prefer, or a refusal when the burst cannot tell. |
+| `BurstAudit` | Crop margin needed, anchor choice, motion blur - from the CSVs alone, no frame files. |
 
 **Build requirement:** `JAVA_HOME` must point at **Temurin 21**, not Android
 Studio's bundled JBR 25. Gradle 8.14.3 cannot compile the build scripts on
@@ -34,8 +52,39 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Capture a lamp-lit burst with a moving subject - dimmer light, not a darker
-room.**
+**Pull the twenty-two bursts to the laptop and run the audit.** It needs no
+phone, no SDK and no pixels - only the CSVs - and it settles two open questions
+in one command:
+
+```
+./gradlew :core:test --tests '*BurstAuditTest*' \
+    -Dstablestill.burstRoot=/path/to/bursts
+```
+
+That prints one line per burst - corner shift, rotation against budget, the
+smallest crop margin that would have kept every frame, the anchor it chose and
+the blur that choice avoided - then a summary naming the hungriest burst. The
+crop question below turns on the maximum across all twenty-two, and one burst
+cannot supply it. Copying only `manifest.txt`, `frames.csv` and `gyro.csv` is
+a few hundred kilobytes and enough; the 3.3 GB of frame files can wait.
+
+With the frame files, the second thing is a threshold sweep with no handset in
+it, via `ThresholdSweep` - and a first look at what `OpticalRefinement` leaves
+behind on a real burst, which is the number that decides how much of Phase 4c
+is worth keeping.
+
+### Then, on the phone
+
+**Two bursts, and the second one is new.**
+
+**A tilt burst, to settle handedness.** Pitch and yaw the phone through the
+burst - *do not roll it*. Rotations about the optical axis commute with the
+sensor-orientation rotation that handedness flips, so a rolling burst gives both
+signs identical homographies and decides nothing. `RigCalibration` will refuse
+to answer in that case rather than guess, and reports how far apart the two
+hypotheses placed a crop corner so the refusal is legible.
+
+**A lamp-lit burst with a moving subject - dimmer light, not a darker room.**
 
 This is the one burst that would let `MAX_SIGMA` rise from 0.15, which is worth
 about 6% of the noise reduction at high ISO. What it needs:
@@ -53,9 +102,17 @@ Note also that **12.5 MP caps at ISO 1047**; the 8 MP mode reaches ~3000.
 Two errands remain outstanding and neither blocks:
 
 - **The 20-vs-30 fps trade.** The 12.5 MP and 8 MP daylight pairs it needs
-  exist as of 9 September and are unexamined.
+  exist as of 9 September and are unexamined. The trade is mostly decided
+  analytically below; the pairs would confirm it rather than settle it.
 - **A deliberately shaky burst**, for the crop question below - though two dim
-  bursts already merged only 6 of 8 frames at ~350 px of corner shift.
+  bursts already merged only 6 of 8 frames at ~350 px of corner shift, which is
+  most of the answer.
+
+And one edit is waiting for a machine that can build `:app`: **wire
+`OpticalRefinement` into `BurstReplayer`**, between the plan and the render.
+It was left undone deliberately - there was no Android SDK in the session that
+wrote it, so `settings.gradle.kts` drops `:app` and the code could not have been
+compiled, let alone run.
 
 On the phone: **Capture** tab, depth **8**, max exposure **20 ms**. Watch that
 auto-exposure does not hold 20 ms in bright light - three rooftop bursts came
@@ -113,20 +170,65 @@ washes out long before bold type doubles. See "Do this first".
 
 ---
 
-## Open question the reader can now answer cheaply
+## The crop margin: not far too generous after all
 
-**The 12% crop margin may be far too generous - but less obviously so than it
-looked.** Replaying the one capped burst: worst rotation 10.4 mrad against a
-budget of 118 mrad, so 9% of the margin was used. A 12% margin per side costs
-38% of the pixel count, which is a lot of resolution to spend on headroom
-nobody touched.
+The suspicion was that 12% per side is lavish, since it costs 42% of the pixel
+count. It was formed from the steadiest burst in the collection, and the
+audit now says the opposite.
 
-The motion burst of 9 September is the first counter-example: **253 px of max
-corner shift**, about a quarter of the 490 px budget, from ordinary handheld
-movement over 350 ms. Still well inside, but a factor of twenty-five above the
-steady burst, so the margin is not headroom nobody touches - it is headroom
-nobody has yet exhausted. `BurstReplayTest` makes the rest of the question a
-matter of replaying a handful of bursts rather than arguing.
+That burst does need almost nothing - `minimumSafeMargin` puts it at **1.13%
+per side**, with 11.7% of the slack used and rotation at 10.4 mrad against a
+118 mrad budget. But the shifts already recorded tell a different story at the
+other end. The 9 September motion burst moved a corner **253 px** and the two
+dim bursts about **350 px**. Against 4080 px of width that is 6.2% and 8.6%;
+against 3060 px of height, 8.3% and **11.4%**. Which axis the excursion runs
+along decides whether the worst burst on record sits comfortably inside 12% or
+almost exactly on it.
+
+So: **roughly right, possibly trimmable to 10%.** That would buy back 10.8% of
+the pixel count - `(1-2m)^2` is 0.64 against 0.578 - and still clear a 350 px
+excursion by 17% *on the x axis only*. On the y axis it would not clear it at
+all.
+
+Running the audit over all twenty-two bursts is what settles this, and it needs
+no pixels. See "Do this first". Do not trim the margin on the strength of the
+steady burst; that is the mistake this question was already making.
+
+## The anchor is a real choice, and its value is not where it looks
+
+On the fixture burst the selector picks **frame 1, not frame 0**, and is 2.07x
+steadier than the average frame - so it is not defaulting. But frames 0 and 1
+are tied to within 0.15%, which is noise, while frames 6 and 7 carry 3.6 and
+5.5 px of blur against the anchor's 1.3.
+
+**The choice between the top two is a coin toss; the value is entirely in
+avoiding the worst frames.** Worth knowing before anyone spends effort on a
+sharpness-based tie-break: at ISO 1047 a Laplacian score is inflated by noise,
+so it would be breaking a tie that does not matter, using a measure that cannot
+be trusted at that gain. One burst, so confirm it across the collection - the
+audit reports it per burst.
+
+## The 20-vs-30 fps trade is decided by the ISO ceiling
+
+The daylight pairs are still unexamined, but most of the trade is already
+settled by things measured elsewhere. 12.5 MP runs at 20 fps and 8 MP at 30;
+eight frames span 351 ms or 233 ms.
+
+- **Noise is neutral.** The 20 ms exposure cap sits below both frame intervals
+  (50.1 and 33.4 ms), so it binds at neither rate: same exposure, same gain,
+  same per-frame noise, same stacking benefit at the same frame count.
+- **The shorter span buys alignment** - a third less time for tremor - and the
+  crop finding above says that is worth very little in good light.
+- **It costs 36% of the pixels.**
+- **The ISO ceiling decides it.** 12.5 MP caps at ISO 1047; 8 MP reaches
+  2425-3055. Past the cap, full resolution cannot expose the scene at all, and
+  stacking does not rescue an underexposed frame.
+
+**Stay at 12.5 MP / 20 fps while metered ISO is under about 1000; drop to
+8 MP / 30 fps when the scene asks for more gain.** Below the cap the resolution
+is free; above it, the resolution is imaginary. The one case that could
+overturn this is document capture, where 8-point type wants every pixel and the
+parallax residual wants the shorter span - and that needs the page burst.
 
 ---
 
@@ -186,6 +288,13 @@ requirement**. The consolation is that a page is the easiest possible case for
 it: planar, richly textured, no moving elements, no internal parallax. A planar
 scene's true inter-frame motion *is* a homography, so refinement is
 well-conditioned and the gyro supplies a good initial estimate.
+
+**That refiner now exists** (`OpticalRefinement`), and the 10-30 px predicted
+here is exactly the range it was tested across - recovered to within 0.2 px,
+with the pyramid depth chosen because that is what reaches it. It estimates a
+translation only, which is the term a gyroscope cannot see and the one parallax
+produces; if a real page burst shows residual a translation cannot absorb, that
+is the signal to grow it, and the residual it reports is how you would know.
 
 Two smaller consequences: the crop budget fights tight page framing, since
 people frame edge-to-edge; and a static subject permits **more frames over a
