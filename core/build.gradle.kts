@@ -38,4 +38,11 @@ tasks.test {
     System.getProperty("stablestill.burstDir")?.let {
         systemProperty("stablestill.burstDir", it)
     }
+    // Likewise for the whole-collection audit, which takes a folder of bursts.
+    System.getProperty("stablestill.burstRoot")?.let {
+        systemProperty("stablestill.burstRoot", it)
+    }
+    // The audit's table is the deliverable, not a debugging aid, so let it
+    // through instead of swallowing it as the default test runner would.
+    testLogging.showStandardStreams = true
 }
