@@ -57,6 +57,26 @@ object BurstReader {
         RandomAccessFile(file, "r").use { it.readFully(pixels) }
         return LumaPlane(record.width, record.height, pixels)
     }
+
+    /**
+     * Reads one frame in full, chroma included.
+     *
+     * Three times the bytes of [readLuma], and worth it only for the merge,
+     * which compares warped pixels against the anchor in RGB. Everything else
+     * in the pipeline should keep reading luma alone.
+     */
+    fun readFrame(directory: File, record: BurstFrameRecord): YuvFrame {
+        val file = File(directory, record.fileName)
+        require(file.isFile) { "Missing frame file: $file" }
+        val expected = BurstArchive.frameByteCount(record.width, record.height)
+        require(file.length() == expected) {
+            "${record.fileName} is ${file.length()} bytes, expected $expected for " +
+                "${record.width}x${record.height} - the frame is not the geometry the CSV claims"
+        }
+        val bytes = ByteArray(expected.toInt())
+        RandomAccessFile(file, "r").use { it.readFully(bytes) }
+        return YuvFrame.fromI420(record.width, record.height, bytes)
+    }
 }
 
 /**
