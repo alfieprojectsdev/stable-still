@@ -23,7 +23,7 @@ are laptop work against archived bursts.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **91 unit tests**, including a real-burst replay. |
+| 2 | Motion maths | **98 unit tests**, including a real-burst replay. |
 | 3 | GPU warp + merge | **Runs on device; also runs on the JVM.** Threshold derived from noise, ceiling measured against motion. |
 | 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement. Refinement and handedness calibration **built and unit-tested, not yet run on hardware or wired into `:app`**. |
 | 5 | Product UX | Not started. |

@@ -48,6 +48,11 @@ data class RefinementResult(
     val residualBefore: Double,
     val residualAfter: Double,
     val iterations: Int,
+    /**
+     * Whether the *finest* level settled, which is the only one whose units the
+     * answer is in. A coarse level converging says the search found the right
+     * neighbourhood, not that it arrived.
+     */
     val converged: Boolean,
 ) {
     val shiftPx: Double get() = hypot(translationX, translationY)
@@ -130,20 +135,37 @@ object OpticalRefinement {
                 anchorL, scaleSampling(anchorSampling, scale),
                 crop, scale, options.targetSamples,
             )
-            if (grid.count == 0) continue
 
-            val frameSamplingL = scaleSampling(frameSampling, scale)
-            for (iteration in 0 until options.iterationsPerLevel) {
-                iterations++
-                val step = solveStep(grid, frameL, frameSamplingL, tx, ty, options)
-                    ?: break
-                tx += step.first
-                ty += step.second
-                if (hypot(step.first, step.second) < options.convergenceEpsilonPx) {
-                    converged = true
-                    break
+            // Convergence describes this level only, and is cleared on entry:
+            // the finest level is the one whose units the answer is in, and a
+            // coarse level settling says the search found the right
+            // neighbourhood, not that it arrived.
+            //
+            // The empty-grid case is handled by a branch rather than a
+            // `continue` so the rescale below cannot be stepped over. That is
+            // defensive rather than a fix for a live bug: `sampleGrid`'s bounds
+            // are `1.5` and `width - 2.5` in *level* units, which in full-size
+            // terms tighten as the level coarsens, so emptiness is monotone -
+            // every empty level precedes every populated one, and the estimate
+            // being carried across is still zero when it happens. Worth not
+            // relying on, since it is a property of the bounds and not of the
+            // loop.
+            converged = false
+            if (grid.count > 0) {
+                val frameSamplingL = scaleSampling(frameSampling, scale)
+                for (iteration in 0 until options.iterationsPerLevel) {
+                    iterations++
+                    val step = solveStep(grid, frameL, frameSamplingL, tx, ty, options)
+                        ?: break
+                    tx += step.first
+                    ty += step.second
+                    if (hypot(step.first, step.second) < options.convergenceEpsilonPx) {
+                        converged = true
+                        break
+                    }
                 }
             }
+
             // Down a level, a source pixel is worth two of the ones just used.
             if (level > 0) {
                 tx *= 2.0

@@ -9,6 +9,12 @@ data class HandednessScore(
     /** Mean RMS luma residual over the frames it could align, 0..1 range. */
     val meanResidual: Double,
     val perFrame: Map<Int, Double>,
+    /**
+     * Frames this hypothesis kept on the sensor - which is not the number it was
+     * scored on. Scoring uses only frames both signs kept, so the two means are
+     * comparable; this is here because a sign that drops frames the other keeps
+     * is itself evidence, and hiding it inside the mean would make it invisible.
+     */
     val usableCount: Int,
 )
 
@@ -27,6 +33,8 @@ data class HandednessVerdict(
      */
     val separationPx: Double,
     val maxRotationRadians: Double,
+    /** Frames scored under *both* signs. Zero means there is no evidence either way. */
+    val comparedCount: Int,
     val decisive: Boolean,
 ) {
     val better: HandednessScore get() = scores.minByOrNull { it.meanResidual }!!
@@ -111,11 +119,21 @@ object RigCalibration {
 
         for (frame in frames) {
             if (frame.index == anchorIndex) continue
+            // Both hypotheses are scored on the *same* frames or on neither.
+            //
+            // Scoring each on whatever it happened to keep compares two means
+            // over two different bursts: a wrong sign that flings the
+            // high-motion frames off the sensor would then be judged only on
+            // the calm ones it kept, which are the frames it gets most nearly
+            // right, and it can win on a subset while being wrong everywhere.
+            val alignments = plans.mapValues { (_, plan) ->
+                plan.alignments.first { it.frameIndex == frame.index }
+            }
+            if (alignments.values.any { !it.usable }) continue
+
             // Read once, score twice.
             val luma = lumaAt(frame.index)
-            for ((handedness, plan) in plans) {
-                val alignment = plan.alignments.first { it.frameIndex == frame.index }
-                if (!alignment.usable) continue
+            for ((handedness, alignment) in alignments) {
                 residuals.getValue(handedness)[frame.index] = OpticalRefinement.residual(
                     anchor = anchor,
                     anchorSampling = anchorSampling,
@@ -127,6 +145,7 @@ object RigCalibration {
             }
         }
 
+        val comparedCount = residuals.getValue(1).size
         val scores = plans.keys.map { handedness ->
             val perFrame = residuals.getValue(handedness)
             HandednessScore(
@@ -134,13 +153,21 @@ object RigCalibration {
                 meanResidual = if (perFrame.isEmpty()) Double.MAX_VALUE
                 else perFrame.values.average(),
                 perFrame = perFrame,
-                usableCount = perFrame.size,
+                usableCount = plans.getValue(handedness).usableCount,
             )
         }.sortedBy { it.meanResidual }
 
-        val margin =
-            if (scores[0].meanResidual <= 0.0 || scores[1].meanResidual == Double.MAX_VALUE) 1.0
-            else (scores[1].meanResidual - scores[0].meanResidual) / scores[0].meanResidual
+        // No frame survived under both signs, so there is no evidence at all.
+        // The previous arithmetic turned that into a margin of 1.0 and a
+        // confident verdict, which is the worst available answer: it would be
+        // written into the manifest of every burst captured afterwards.
+        val margin = when {
+            comparedCount == 0 -> 0.0
+            scores[0].meanResidual > 0.0 ->
+                (scores[1].meanResidual - scores[0].meanResidual) / scores[0].meanResidual
+            scores[1].meanResidual > 0.0 -> Double.POSITIVE_INFINITY
+            else -> 0.0
+        }
 
         return HandednessVerdict(
             chosen = rig.copy(handedness = scores[0].handedness),
@@ -148,7 +175,10 @@ object RigCalibration {
             margin = margin,
             separationPx = separationPx,
             maxRotationRadians = maxRotation,
-            decisive = separationPx >= MIN_SEPARATION_PX && margin >= MIN_MARGIN,
+            comparedCount = comparedCount,
+            decisive = comparedCount > 0 &&
+                separationPx >= MIN_SEPARATION_PX &&
+                margin >= MIN_MARGIN,
         )
     }
 
@@ -188,22 +218,32 @@ object RigCalibration {
         )
         for (score in verdict.scores) {
             appendLine(
-                "  %+d  residual %.5f over %d frames".format(
-                    score.handedness, score.meanResidual, score.usableCount,
+                "  %+d  residual %s over %d compared, %d frames kept".format(
+                    score.handedness,
+                    if (score.meanResidual == Double.MAX_VALUE) "none"
+                    else "%.5f".format(score.meanResidual),
+                    verdict.comparedCount,
+                    score.usableCount,
                 )
             )
         }
         if (!verdict.decisive) {
             appendLine(
-                if (verdict.separationPx < MIN_SEPARATION_PX)
-                    "  INDECISIVE: both signs place the frame within " +
-                        "%.1f px, so this burst cannot tell them apart. ".format(
-                            verdict.separationPx
-                        ) + "Capture one with pitch and yaw in it, not roll."
-                else
-                    "  INDECISIVE: the residuals differ by only %.1f%%.".format(
-                        verdict.margin * 100.0
-                    )
+                when {
+                    verdict.comparedCount == 0 ->
+                        "  INDECISIVE: no frame survived under both signs, so " +
+                            "nothing was compared and the sign above is the one " +
+                            "it was handed, not one it chose."
+                    verdict.separationPx < MIN_SEPARATION_PX ->
+                        "  INDECISIVE: both signs place the frame within " +
+                            "%.1f px, so this burst cannot tell them apart. ".format(
+                                verdict.separationPx
+                            ) + "Capture one with pitch and yaw in it, not roll."
+                    else ->
+                        "  INDECISIVE: the residuals differ by only %.1f%%.".format(
+                            verdict.margin * 100.0
+                        )
+                }
             )
         }
     }

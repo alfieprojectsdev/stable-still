@@ -181,6 +181,64 @@ The one case that could overturn this is document capture, where 8-point type
 wants every pixel and the parallax residual wants the shorter span. That one
 needs the page burst before anyone argues about it.
 
+### A review pass, and what it says about writing tests
+
+A code review over the branch found seven defects in the above, all fixed, each
+with a regression test. What they have in common is worth more than the list:
+**every one of them produced a plausible answer.** Nothing crashed, no test went
+red, and each wrong result sat in exactly the range a right one would.
+
+- `compareRates` printed a literal `%.0f` and put a burst span where a
+  percentage belonged, because `"..." + "...".format(x)` binds the format to the
+  last fragment alone. In the one output the fps comparison exists to produce.
+- Both handedness hypotheses were averaged over *whatever each one individually
+  kept*. A wrong sign that flings the high-motion frames off the sensor was then
+  judged only on the calm ones it kept - the frames it gets most nearly right -
+  and could win a comparison it deserved to lose. Now scored on the frames both
+  signs kept, with the asymmetry reported separately rather than buried.
+- With no frame usable under either sign, the margin short-circuited to 1.0 and
+  the verdict came back **decisive**: a confident sign from zero evidence, which
+  is precisely the failure the indecisive path was written to prevent, and it
+  would have travelled in the manifest of every burst captured afterwards.
+- `converged` was set by any pyramid level and never cleared, so a coarse level
+  settling made the whole refinement claim convergence while the finest level
+  was still hunting. The answer is in the finest level's units; a caller
+  trusting the flag would trust a digit that is not there.
+- The sentinel for "infinitely steadier than average" was `MAX_VALUE`, which is
+  finite, so the `isFinite` filter written to drop it kept it and put 1.79e308
+  into a reported median. It is `POSITIVE_INFINITY` now, which is both true and
+  detectable.
+- The anchor frame was fetched twice, against a documented promise that each
+  frame is requested once - 17.9 MB re-read per merge for a streaming caller.
+- A worker thread throwing died silently: `join` returned, and the merge
+  returned a picture with a stripe missing and an `effectiveFrameCount` that
+  reported the loss as honest rejection.
+
+Two findings did not survive investigation, and that is the other lesson. A
+`continue` that steps over the inter-level rescale is real in the source and
+**unreachable in practice**: `sampleGrid` bounds a tap in *level* units, which
+tighten as the level coarsens, so emptiness is monotone - every empty level
+precedes every populated one and the estimate carried across is still zero. The
+loop was restructured anyway, since the reasoning lives in the bounds rather
+than the loop, but no test asserts a failure that cannot happen.
+
+**Every regression test here was checked by reverting its fix.** Three of the
+first drafts passed against the broken code - they exercised the right function
+and never reached the defect - which would have left the branch looking guarded
+and not being. Two needed a specific burst to reproduce at all: the handedness
+subset bug only shows where the signs genuinely disagree about which frames fit
+(a 5% margin and one particular tremor, keeping `{5}` against `{5, 7}`), and the
+convergence bug needs near-Nyquist texture so the coarse levels settle while the
+finest is still hunting. A regression test that has not been watched to fail is
+a guess about what it covers.
+
+One guard is deliberately untested. Injecting a worker-thread failure needs a
+`YuvFrame` that throws from `sampleRgb`, which means making that method virtual -
+and it is called once per output pixel per frame, seventy million times for an
+eight-frame 12.5 MP burst, in the loop whose speed is the entire reason this
+module exists. It was verified by hand against a temporarily opened class and
+the seam was not kept.
+
 ### Not done, and why
 
 `:app` was not touched. There is no Android SDK in this environment, so

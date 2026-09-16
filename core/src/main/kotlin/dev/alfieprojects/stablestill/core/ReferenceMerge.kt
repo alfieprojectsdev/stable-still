@@ -142,7 +142,12 @@ object ReferenceMerge {
         // Pass 1 - the reference every other frame is judged against.
         val anchorAlignment = plan.alignments.firstOrNull { it.frameIndex == plan.anchorIndex }
             ?: error("Anchor frame ${plan.anchorIndex} has no alignment in the plan")
-        val anchor = renderAnchor(frameAt(plan.anchorIndex), anchorAlignment, width, height)
+        // Held, not re-fetched. The anchor is needed twice - once to render the
+        // reference and once as an ordinary contributor - and asking `frameAt`
+        // for it a second time would re-read 17.9 MB from disk for a caller
+        // streaming frames, which is the cost the callback exists to avoid.
+        val anchorFrame = frameAt(plan.anchorIndex)
+        val anchor = renderAnchor(anchorFrame, anchorAlignment, width, height)
 
         // Pass 2 - weighted accumulation. Interleaved r, g, b, weight, because
         // that is one cache line's worth of the same pixel rather than four
@@ -153,8 +158,8 @@ object ReferenceMerge {
 
         for (alignment in plan.alignments) {
             if (!alignment.usable) continue
-            val frame = frameAt(alignment.frameIndex)
             val isAnchor = alignment.frameIndex == plan.anchorIndex
+            val frame = if (isAnchor) anchorFrame else frameAt(alignment.frameIndex)
             val summed = accumulate(
                 frame, alignment, anchor, accum, width, height, rejectSigma, isAnchor,
             )
@@ -389,16 +394,27 @@ object ReferenceMerge {
             for (py in 0 until height) body(py)
             return
         }
+        // A worker that throws dies quietly: `join` returns normally and the
+        // accumulator is left holding whatever that thread managed before it
+        // failed. The merge would then return a picture missing a stripe, and an
+        // effectiveFrameCount that reports the loss as rejection. So the first
+        // failure is kept and rethrown once every worker has stopped.
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
         val threads = (0 until workers).map { worker ->
             Thread {
-                var py = worker
-                while (py < height) {
-                    body(py)
-                    py += workers
+                try {
+                    var py = worker
+                    while (py < height) {
+                        body(py)
+                        py += workers
+                    }
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
                 }
             }
         }
         threads.forEach { it.start() }
         threads.forEach { it.join() }
+        failure.get()?.let { throw it }
     }
 }

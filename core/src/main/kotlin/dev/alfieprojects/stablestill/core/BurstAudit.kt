@@ -148,7 +148,12 @@ object BurstAudit {
             anchorSteadiness = anchorScore,
             meanSteadiness = meanScore,
             worstSteadiness = scores.values.max(),
-            anchorAdvantage = if (anchorScore <= 0.0) Double.MAX_VALUE else meanScore / anchorScore,
+            // Infinity, not MAX_VALUE. A perfectly motionless anchor really is
+            // unboundedly steadier than an average frame, and the sentinel has
+            // to be one that `isFinite` rejects - MAX_VALUE is finite, so it
+            // survived the filter in `summarise` and landed 1.79e308 in a median.
+            anchorAdvantage = if (anchorScore <= 0.0) Double.POSITIVE_INFINITY
+            else meanScore / anchorScore,
             anchorBlurPx = blur.getValue(anchorIndex),
             meanBlurPx = blur.values.average(),
             worstBlurPx = blur.values.max(),
@@ -232,7 +237,7 @@ object BurstAudit {
         )
         for (r in rows) {
             appendLine(
-                "%-24s %4.1f %5.1f %5.1f %6.0f %6.0f  %4.1f/%-5.1f %5.1f%%  %8s  %3d %4.2f %5.1f"
+                "%-24s %4.1f %5.1f %5.1f %6.0f %6.0f  %4.1f/%-5.1f %5.1f%%  %8s  %3d %4s %5.1f"
                     .format(
                         r.name.take(24),
                         r.megapixels,
@@ -245,7 +250,12 @@ object BurstAudit {
                         r.marginUsed * 100.0,
                         r.minimumSafeMargin?.let { "%.3f".format(it) } ?: "none",
                         r.anchorIndex,
-                        r.anchorAdvantage,
+                        // A motionless burst makes this infinite, and "Infinity"
+                        // in a numeric column would shunt every later field along
+                        // - in a twenty-two row table the misalignment is the
+                        // first thing read and the last thing believed.
+                        if (r.anchorAdvantage.isFinite()) "%4.2f".format(r.anchorAdvantage)
+                        else "inf",
                         r.anchorBlurPx,
                     )
             )
@@ -310,8 +320,14 @@ object BurstAudit {
      */
     fun compareRates(slower: BurstAuditRow, faster: BurstAuditRow): String = buildString {
         require(faster.fps >= slower.fps) { "compareRates takes the slower burst first" }
-        appendLine("${slower.name} (%.0f fps) against ${faster.name} (%.0f fps)".format(
-            slower.fps, faster.fps,
+        // Every line below is one string literal, and every value arrives as an
+        // argument rather than through interpolation. Splitting a format string
+        // across a `+` binds `.format` to the last fragment alone, which is how
+        // this printed a literal "%.0f ms" and put a span where a percentage
+        // belonged; interpolating a burst name would likewise hand `format` a
+        // stray `%` out of a directory name.
+        appendLine("%s (%.0f fps) against %s (%.0f fps)".format(
+            slower.name, slower.fps, faster.name, faster.fps,
         ))
         appendLine(
             "  Resolution: %.1f MP against %.1f MP - %+.0f%%".format(
@@ -320,11 +336,11 @@ object BurstAudit {
             )
         )
         appendLine(
-            "  Burst span: %.0f ms against %.0f ms - the faster burst gives tremor " +
-                "%.0f%% less time to accumulate".format(
-                    slower.spanMs, faster.spanMs,
-                    (1.0 - faster.spanMs / slower.spanMs) * 100.0,
-                )
+            ("  Burst span: %.0f ms against %.0f ms - the faster burst gives tremor " +
+                "%.0f%% less time to accumulate").format(
+                slower.spanMs, faster.spanMs,
+                (1.0 - faster.spanMs / slower.spanMs) * 100.0,
+            )
         )
         appendLine(
             "  Corner shift: %.0f px against %.0f px, needing %s against %s of margin".format(
