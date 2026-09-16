@@ -31,7 +31,8 @@ not have) or on multi-frame HDR alignment that assumes you barely moved.
 
 ```
 core/    Pure Kotlin. Quaternions, gyro integration, homography, anchor
-         selection, alignment planning. No Android imports - unit-tested on the JVM.
+         selection, alignment planning - and a CPU reference merge, optical
+         refinement and burst audits. No Android imports; unit-tested on the JVM.
 app/     Android. Camera2 capture, sensor recording, GLES warp and merge, UI.
 docs/    Architecture, roadmap, and the device-specific constraint notes.
 ```
@@ -39,6 +40,13 @@ docs/    Architecture, roadmap, and the device-specific constraint notes.
 The split is load-bearing. Everything that decides *where a pixel goes* lives in
 `core` and is tested in milliseconds on a laptop; only the parts that genuinely
 need hardware live in `app`.
+
+That now extends to the merge itself. `ReferenceMerge` runs the shaders' three
+passes on the CPU, so a rejection-threshold sweep, a crop audit or an alignment
+residual is laptop work against an archived burst rather than a handset on a
+desk. The GPU path stays the production one - nine million output pixels times
+eight frames is what a GPU is for - and the CPU path is what it is answerable
+to.
 
 ## Building
 
@@ -59,9 +67,9 @@ test suite stays runnable in CI and on any machine.
 |---|---|---|
 | 0 | Device probe - what can this phone actually do? | Implemented |
 | 1 | Ring-buffer capture + gyro recording | Runs on device; bursts saved and replayed |
-| 2 | Motion maths (integration, homography, anchors) | Implemented, 61 unit tests passing |
-| 3 | GPU warp + ghost-rejecting merge | Runs on device; rejection threshold measured |
-| 4 | Clock-sync auto-calibration + optical refinement | Scaffolded, not implemented |
+| 2 | Motion maths (integration, homography, anchors) | Implemented, 91 unit tests passing |
+| 3 | GPU warp + ghost-rejecting merge | Runs on device, and on the JVM; rejection threshold measured |
+| 4 | Rig calibration + optical refinement | Built and unit-tested; not yet run on hardware |
 | 5 | UX, presets, long-exposure mode | Not started |
 
 **Start by running Phase 0 on the handset.** The probe reports whether the
