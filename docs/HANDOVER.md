@@ -3,17 +3,19 @@
 The current state and the next action. `docs/SESSION-LOG.md` records how it got
 here; `docs/DEVICE-A07.md` is the authority on what the hardware does.
 
-Updated 16 September 2026 (fourth session).
+Updated 17 September 2026 (fifth session).
 
 Phases 0 to 3 all run: probe, capture, archive, JVM replay, GPU merge. The
-merge's rejection threshold is measured at both ends. **Phase 4's maths now
-exists in `:core` and has never met the hardware** - optical refinement and
-handedness calibration are written and tested against bursts whose answers are
-known by construction, and neither has seen a real frame.
+merge's rejection threshold is measured at both ends. **Phase 4 has met the
+hardware, and the first thing it found was that the rig handedness had been
+wrong since the first burst.** It is -1, measured on four bursts, and every
+alignment before 17 September was computed through +1. With the sign right,
+optical refinement removes the 2-14 px of parallax a 30 cm scene carries and
+is a near no-op at distance, which is what it was designed to do.
 
-The bigger change is that most of what is left no longer needs a phone. The
-merge runs on a JVM, so threshold sweeps, crop audits and alignment residuals
-are laptop work against archived bursts.
+Most of what is left no longer needs a phone. The merge runs on a JVM, so a
+ten-threshold sweep of a 12.5 MP burst is eighty seconds at a desk, and the
+crop audit over all 27 archives needs only their CSVs.
 
 ---
 
@@ -23,9 +25,9 @@ are laptop work against archived bursts.
 |---|---|---|
 | 0 | Device probe | **Run. Verdict `HARDWARE_FAST`.** |
 | 1 | Ring-buffer capture + gyro recording | **Runs. Bursts saved and replayed.** |
-| 2 | Motion maths | **98 unit tests**, including a real-burst replay. |
+| 2 | Motion maths | **96 unit tests**, five more gated on a real burst path. |
 | 3 | GPU warp + merge | **Runs on device; also runs on the JVM.** Threshold derived from noise, ceiling measured against motion. |
-| 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement. Refinement and handedness calibration **built and unit-tested, not yet run on hardware or wired into `:app`**. |
+| 4 | Sync calibration + optical refinement | Sync and skew deleted by measurement. **Handedness measured: -1.** Refinement wired into the replayer and run on hardware; 14-40 s per burst on the phone. |
 | 5 | Product UX | Not started. |
 
 `:app` now builds and runs on the A07. The warning that it had never been
@@ -52,37 +54,38 @@ Java 25 and fails with a bare `IllegalArgumentException: 25.0.3`.
 
 ## Do this first
 
-**Pull the twenty-two bursts to the laptop and run the audit.** It needs no
-phone, no SDK and no pixels - only the CSVs - and it settles two open questions
-in one command:
+**Make refinement ignore a moving subject.** On the static control it lowers
+the ghost at every threshold; on the hand-crossing burst it raises it, because
+a rigid-scene translation is pulled toward a subject filling a third of the
+frame and drags the background out of alignment behind it. Until it can be
+told where not to look it is not safe to leave on for a moving scene, and the
+replayer currently leaves it on. `ReferenceMerge.disagreement` already
+computes the mask a robust fit would want; the work is in `OpticalRefinement`,
+weighting or excluding samples by it, with a test on a synthetic burst whose
+subject is known. Pure `:core`, no phone.
+
+**Then the rooftop document.** Burst 113314, 177 px of shift, keeps a residual
+near 0.10 that translation does not absorb, under either sign. It is the
+planar, textured, static case that should be easiest, and at 177 px of motion
+with 27 ms of rolling-shutter skew the rows of one frame were exposed under
+measurably different rotations. Whether that is what remains is checkable on
+the JVM against the frames already on the laptop.
+
+Both run from the desk. The commands:
 
 ```
+./gradlew :core:test --tests '*ThresholdSweepTest*real*' \
+    -Dstablestill.burstDir=/path/to/burst-20260909-085849
+./gradlew :core:test --tests '*RigCalibrationTest*real*' \
+    -Dstablestill.burstDir=/path/to/burst-...
 ./gradlew :core:test --tests '*BurstAuditTest*' \
     -Dstablestill.burstRoot=/path/to/bursts
 ```
 
-That prints one line per burst - corner shift, rotation against budget, the
-smallest crop margin that would have kept every frame, the anchor it chose and
-the blur that choice avoided - then a summary naming the hungriest burst. The
-crop question below turns on the maximum across all twenty-two, and one burst
-cannot supply it. Copying only `manifest.txt`, `frames.csv` and `gyro.csv` is
-a few hundred kilobytes and enough; the 3.3 GB of frame files can wait.
-
-With the frame files, the second thing is a threshold sweep with no handset in
-it, via `ThresholdSweep` - and a first look at what `OpticalRefinement` leaves
-behind on a real burst, which is the number that decides how much of Phase 4c
-is worth keeping.
+Frame files for 085821, 085849, 113314 and 225438 are on the laptop; the other
+23 bursts have CSVs only, which is all the audit needs.
 
 ### Then, on the phone
-
-**Two bursts, and the second one is new.**
-
-**A tilt burst, to settle handedness.** Pitch and yaw the phone through the
-burst - *do not roll it*. Rotations about the optical axis commute with the
-sensor-orientation rotation that handedness flips, so a rolling burst gives both
-signs identical homographies and decides nothing. `RigCalibration` will refuse
-to answer in that case rather than guess, and reports how far apart the two
-hypotheses placed a crop corner so the refusal is legible.
 
 **A lamp-lit burst with a moving subject - dimmer light, not a darker room.**
 
@@ -104,15 +107,10 @@ Two errands remain outstanding and neither blocks:
 - **The 20-vs-30 fps trade.** The 12.5 MP and 8 MP daylight pairs it needs
   exist as of 9 September and are unexamined. The trade is mostly decided
   analytically below; the pairs would confirm it rather than settle it.
-- **A deliberately shaky burst**, for the crop question below - though two dim
-  bursts already merged only 6 of 8 frames at ~350 px of corner shift, which is
-  most of the answer.
-
-And one edit is waiting for a machine that can build `:app`: **wire
-`OpticalRefinement` into `BurstReplayer`**, between the plan and the render.
-It was left undone deliberately - there was no Android SDK in the session that
-wrote it, so `settings.gradle.kts` drops `:app` and the code could not have been
-compiled, let alone run.
+- **A deliberately shaky burst**, for the crop question below. The audit over
+  all 27 has since put the hungriest fitting burst at 7.6% per side, with the
+  two that exceed the budget beyond any margin; a shaky burst would add a
+  point, not change the answer.
 
 On the phone: **Capture** tab, depth **8**, max exposure **20 ms**. Watch that
 auto-exposure does not hold 20 ms in bright light - three rooftop bursts came
@@ -125,6 +123,8 @@ adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
 ```
 
 Omit `rejectSigma` to use the derived one, and `burst` to take the newest.
+`--ez refine false` skips optical refinement and names the output `-gyro`, so
+a before-and-after does not overwrite itself.
 Results land under the `AutoReplay` logcat tag, and the output JPEG is named
 after the threshold that produced it. **Leave a couple of seconds between
 replays**: the next `am start` otherwise races the previous activity's
@@ -139,10 +139,10 @@ being silently ignored is the symptom.
 
 ---
 
-## The rejectSigma threshold, as of 9 September
+## The rejectSigma threshold, as of 17 September
 
 `MAX_SIGMA` is **0.15**, down from a guessed 0.60. `MIN_SIGMA` stays at 0.06
-and `SIGMA_PER_NOISE` at 6.5, both tested rather than assumed. Twenty-two
+and `SIGMA_PER_NOISE` at 6.5, both tested rather than assumed. Twenty-seven
 bursts across ISO 25 to 3055, indoor, rooftop and dim; numbers in
 `docs/SESSION-LOG.md`. What is settled:
 
@@ -159,14 +159,24 @@ bursts across ISO 25 to 3055, indoor, rooftop and dim; numbers in
   session its answer: it reasoned a still room cannot calibrate this, and the
   metric in use simply could not see it.
 
-**This raises the stakes on optical refinement.** If the ceiling is a
-consequence of alignment error, refinement does not merely sharpen the output -
-it raises the ceiling, and buys back the noise reduction the ceiling forgoes.
+**Every one of those figures was measured through the wrong rig handedness**,
+which was found on 17 September. The ceiling was re-checked on the JVM under
+the corrected sign, gyro-only and refined: the ghost-to-static crossing on the
+hand burst sits near 0.13 under both, so 0.15 stands. A moving hand ghosts
+however well the background behind it is aligned. The static-scene figures
+above are from the wrong sign and are now upper bounds: with the sign right and
+refinement on, the static control's ghost at sigma 0.60 fell from 27 levels to
+16.
+
+**Refinement raises the ceiling, measured.** That was the argument last week;
+the sweep now shows it on the static control at every threshold. It also shows
+the cost: on a burst with a moving subject, rigid-scene refinement is pulled
+toward the subject and makes the ghost worse. See "Do this first".
 
 What is *not* settled is whether the ghosting onset scales with noise the way
 the knee does. The evidence leans yes - 3.6x the noise bought roughly 2.7x the
 onset at matched shift - but subject texture confounds it, since fine texture
-washes out long before bold type doubles. See "Do this first".
+washes out long before bold type doubles.
 
 ---
 
@@ -190,9 +200,14 @@ the pixel count - `(1-2m)^2` is 0.64 against 0.578 - and still clear a 350 px
 excursion by 17% *on the x axis only*. On the y axis it would not clear it at
 all.
 
-Running the audit over all twenty-two bursts is what settles this, and it needs
-no pixels. See "Do this first". Do not trim the margin on the strength of the
-steady burst; that is the mistake this question was already making.
+The audit over all 27 ran on 17 September. The hungriest burst that fits at
+all needs **7.6% per side** - the hand burst - and 25 of 27 fit inside 12%. The
+two that do not are the dim shakes, at 102% and 118% of the rotation budget,
+which no margin would have kept. So 10% clears everything that was ever going
+to fit, with a third of the hungriest burst's excess to spare; 12% is not
+lavish, and trimming below 10% would start dropping real bursts. Not changed
+yet - the default is a product decision, not a measurement, and this is the
+measurement.
 
 ## The anchor is a real choice, and its value is not where it looks
 

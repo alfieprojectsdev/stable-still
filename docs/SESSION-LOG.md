@@ -8,6 +8,105 @@ This file carries how it got there.
 
 ---
 
+## 2026-09-17 - the rig was the wrong way round
+
+First session with the cloud branch, the SDK and the phone all in one place.
+The plan was to run what the 16 September session built. What it found was
+that the most error-prone constant in the pipeline had been wrong since the
+first burst.
+
+### Handedness is -1, on every burst asked
+
+`RigCalibration.settleHandedness` gained a real-burst hook and was run on the
+four bursts with frame files on the laptop:
+
+| burst | scene | margin | corners apart | rotation |
+|---|---|---|---|---|
+| 085821 | indoor static, 30 cm | 48% | 55 px | 6.5 mrad |
+| 085849 | indoor, hand crossing | 83% | 459 px | 61 mrad |
+| 113314 | rooftop document | 39% | 300 px | 50 mrad |
+| 225438 | 5 Sept archive | 130% | 84 px | 10 mrad |
+
+Four for four, and none close to the 2 px separation at which the test
+declines to answer. The +1 the code shipped with had been *adding* every
+frame's rotation rather than removing it, for two weeks of measurements.
+
+The default is now `RigAlignment.SETTLED_HANDEDNESS = -1`, so new captures
+record it. The 27 archives on disk record the +1 they were captured with,
+faithfully, so `BurstManifest.replayRig` supplies the manifest's geometry with
+the measured sign, and the replayer, the audit and the pixel tests all align
+through it.
+
+**Why nothing noticed.** Corner shift is a magnitude. Flipping the sign rotates
+the correction the other way by the same amount, so every shift, crop and
+rotation figure in the audit comes out identical under either sign - the
+re-run audit after the fix is the same table to the pixel. Only a residual
+against pixels can see handedness, and until 16 September there was no code
+that measured one.
+
+### With the sign right, refinement finds what it was built to find
+
+`OpticalRefinement` is wired into `BurstReplayer` and ran on the phone under
+both signs. What it had left to correct:
+
+| burst | under +1 | under -1 |
+|---|---|---|
+| archive, far field | 8-65 px, 1.9-2.5x | **0.2-4.3 px**, 1.0-1.3x |
+| indoor static, 30 cm | 7-53 px, 2.1-3.3x | **2-14 px**, 1.4-2.8x, all converge |
+| hand crossing | 41-146 px | 8-133 px, frames 5-7 chasing the hand |
+| rooftop document, 177 px | 19-48 px, 1.0-1.8x | 4-30 px, 1.1-1.3x, residual ~0.10 stays |
+
+The archive row is the confirmation: at distance the gyro alone is enough, and
+refinement is nearly a no-op. The indoor row is the design working: 2-14 px of
+parallax at 30 cm, which a gyroscope cannot see and a page at reading distance
+produces, removed. The document row is open - something translation does not
+model survives, and at 177 px of shift with 27 ms of rolling-shutter skew that
+is the first suspect.
+
+Refinement costs 14-40 s per burst on the phone, which is fine for a replay
+tool and not for a shutter button.
+
+### The sweep runs on the JVM now, and the ceiling stands
+
+`ThresholdSweepTest` gained a real-burst hook: ten thresholds, gyro-only and
+then refined, on a 12.5 MP burst, **80 seconds, no phone**.
+
+On the static control, refinement lowers the ghost from residual misalignment
+at every threshold - **16 levels against 27 at sigma 0.60** - which is the
+"refinement raises the ceiling" claim measured rather than argued. On the
+hand-crossing burst it *raises* it, 28 against 25: a rigid-scene translation is
+pulled toward a subject filling a third of the frame and drags the background
+out of alignment behind it. Refinement needs to be told where not to look
+before it is safe on a moving scene. That is the next thing to build in it.
+
+The ceiling itself was measured last week through the wrong sign, and it
+holds: the ghost-to-static ratio crosses 1.0 at about **0.13** under both plans
+on the hand burst, where the eye put the onset at 0.15. A moving hand ghosts
+however well the background behind it is aligned.
+
+One reading note for the sweep table. `residNoise` comes out *higher* refined
+than gyro-only, and that is not refinement adding noise: the statistic is
+noise plus texture, and alignment good enough to preserve texture reads as
+more of it. Effective frame count is the honest column, and it rises.
+
+### The audit, over all 27
+
+CSVs only, 458 KB, one command. Crop: the hungriest burst that fits at all
+needs **7.6% per side** (the hand burst); 25 of 27 fit inside 12%; the two that
+do not are the dim shakes at 102% and 118% of the rotation budget, which no
+margin saves. Anchor: frame 0 chosen in **5 of 27**, median steadiness
+advantage 2.12x - the selector is working. Blur at the anchor 0.1 to 24 px,
+mean 3.8. None of these move with handedness, for the reason above.
+
+### Also
+
+- The phone had rebooted since the 9th, which clears `adb tcpip`; re-pinned.
+  On the same Wi-Fi the mDNS transport reappears alongside it, so `-s` is
+  needed until the phone leaves the network.
+- Test count 96, five gated on burst paths.
+
+---
+
 ## 2026-09-16 (fourth) - the phone comes out of the loop
 
 No hardware this session, and no burst pixels either: the 3.3 GB of archives

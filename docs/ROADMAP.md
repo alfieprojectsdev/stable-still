@@ -94,6 +94,11 @@ The verdict refuses to choose when the two hypotheses land within a pixel of
 each other, rather than returning a coin toss that would then travel in every
 subsequent manifest.
 
+**Run on 17 September against four real bursts: -1, unanimously**, by margins
+of 39% to 130% with the hypotheses 55 to 459 px apart. The code had shipped
+with +1. `RigAlignment.SETTLED_HANDEDNESS` carries the measurement, and
+archives captured before that date align through `BurstManifest.replayRig`.
+
 **4c. Optical refinement.** ✅ `OpticalRefinement` is Lucas-Kanade on a luma
 pyramid, estimating a residual **translation** per frame - the term a gyroscope
 structurally cannot see, and the one parallax at close range produces. Not

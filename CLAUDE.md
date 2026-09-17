@@ -44,10 +44,13 @@ frames* - no exception, no log, just a frozen preview. `CapturedFrame` owns its
 image; `FrameRingBuffer` closes what it evicts; `StillStacker` closes the burst
 in a `finally`. Preserve that chain.
 
-**`RigAlignment.handedness` is not settled.** It encodes the sign of the
-rotation between gyro and camera axes. The value in the code is derived, not
-confirmed on hardware. If stabilisation makes shake *worse*, flip it - that is
-the first thing to try, not the last.
+**`RigAlignment.handedness` was wrong for a fortnight and nothing noticed.** It
+encodes the sign of the rotation between gyro and camera axes. The derived
+value was +1; the measured value, on four bursts, is -1. Corner shift, crop
+usage and rotation are all magnitudes and come out identical under either
+sign, so no audit can see this - only a residual against pixels can
+(`RigCalibration.settleHandedness`). Archives record the sign they were
+captured with; align them through `BurstManifest.replayRig`, not `rig`.
 
 **Small angles break naive maths.** Hand tremor is milliradians. `acos`-based
 angle extraction collapses to exactly zero there; `Quaternion.angle()` uses
