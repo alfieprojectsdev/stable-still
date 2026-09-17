@@ -3,7 +3,9 @@ package dev.alfieprojects.stablestill.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.io.File
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -155,5 +157,26 @@ class RigCalibrationTest {
             start, 300, 400, Vec3.ZERO,
         ))
         assertFalse(verdict.decisive)
+    }
+
+    @Test
+    fun `a real burst says which sign the rig actually has`() {
+        // Point -Dstablestill.burstDir at a burst with frame files and this
+        // prints the verdict. Not asserted, because the burst decides: one
+        // that only rolls, or barely moves, is entitled to refuse. What is
+        // asserted is that a refusal and a decision are both legible.
+        val dir = System.getProperty(BurstReplayTest.BURST_DIR_PROPERTY)
+        assumeTrue("Set -D${BurstReplayTest.BURST_DIR_PROPERTY} to settle handedness on a real burst", dir != null)
+        val burst = BurstReader.read(File(dir!!))
+        val verdict = RigCalibration.settleHandedness(
+            frames = burst.frames.map { it.toMeta() },
+            track = MotionTrack.integrate(burst.gyro),
+            intrinsics = burst.manifest.intrinsics,
+            rig = burst.manifest.rig,
+            crop = CropWindow(burst.manifest.width, burst.manifest.height, 0.12),
+        ) { index -> BurstReader.readLuma(File(dir), burst.frames.first { it.index == index }) }
+        val report = RigCalibration.format(verdict)
+        println("${File(dir).name} (manifest says ${burst.manifest.rig.handedness}):\n$report")
+        assertTrue(report.isNotBlank())
     }
 }

@@ -238,7 +238,18 @@ data class BurstManifest(
     val frameCount: Int,
     val gyroSampleCount: Int,
     val notes: List<String> = emptyList(),
-)
+) {
+    /**
+     * The rig to align this burst with.
+     *
+     * [rig] is what the capture recorded, faithfully - and until 17 September
+     * 2026 that was the derived handedness, not the measured one, so every
+     * archive from before then carries the wrong sign. Geometry is the
+     * manifest's; the sign is the measurement's.
+     */
+    val replayRig: RigAlignment
+        get() = rig.copy(handedness = RigAlignment.SETTLED_HANDEDNESS)
+}
 
 /** A parsed archive, ready to be integrated and aligned. */
 data class BurstArchiveContents(
