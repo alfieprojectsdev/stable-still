@@ -8,6 +8,8 @@ import dev.alfieprojects.stablestill.core.BurstReader
 import dev.alfieprojects.stablestill.core.CropWindow
 import dev.alfieprojects.stablestill.core.MotionTrack
 import dev.alfieprojects.stablestill.core.NoiseModel
+import dev.alfieprojects.stablestill.core.OpticalRefinement
+import dev.alfieprojects.stablestill.core.RefinementResult
 import dev.alfieprojects.stablestill.gl.EglCore
 import dev.alfieprojects.stablestill.gl.I420YuvSource
 import dev.alfieprojects.stablestill.gl.RenderFrame
@@ -30,6 +32,8 @@ data class ReplayResult(
     val measuredNoise: Double,
     val floatAccumulation: Boolean,
     val elapsedMillis: Long,
+    /** Per-frame refinement evidence; empty when refinement was off. */
+    val refinement: List<RefinementResult> = emptyList(),
 )
 
 /**
@@ -60,6 +64,7 @@ class BurstReplayer(private val outputDir: File) {
         cropMarginFraction: Double = 0.12,
         rejectSigma: Float? = null,
         jpegQuality: Int = 95,
+        refine: Boolean = true,
     ): ReplayResult {
         val started = System.currentTimeMillis()
         val burst = BurstReader.read(directory)
@@ -67,19 +72,43 @@ class BurstReplayer(private val outputDir: File) {
 
         val track = MotionTrack.integrate(burst.gyro)
         val crop = CropWindow(burst.manifest.width, burst.manifest.height, cropMarginFraction)
-        val plan: AlignmentPlan = BurstAligner.plan(
+        val gyroPlan: AlignmentPlan = BurstAligner.plan(
             frames = burst.frames.map { it.toMeta() },
             track = track,
             intrinsics = burst.manifest.intrinsics,
-            rig = burst.manifest.rig,
+            rig = burst.manifest.replayRig,
             crop = crop,
         )
+
+        // The gyro sees rotation only. At close range what it leaves behind is
+        // translation - parallax - and that residual is what sets the merge's
+        // ceiling, so it is corrected before the threshold is chosen and the
+        // GPU receives the corrected plan. The anchor is held; every other
+        // frame's luma is read for refinement and again for the render, 12 MB
+        // twice rather than 143 MB at once.
+        val byIndex = burst.frames.associateBy { it.index }
+        val anchorRecord = byIndex.getValue(gyroPlan.anchorIndex)
+        val anchorLuma = BurstReader.readLuma(directory, anchorRecord)
+        val refined = if (refine) {
+            OpticalRefinement.refinePlan(gyroPlan) { index ->
+                if (index == gyroPlan.anchorIndex) anchorLuma
+                else BurstReader.readLuma(directory, byIndex.getValue(index))
+            }
+        } else null
+        val plan = refined?.plan ?: gyroPlan
+        refined?.results?.values?.forEach {
+            Log.i(
+                TAG,
+                "refine frame ${it.frameIndex}: shift=${"%.2f".format(it.shiftPx)}px " +
+                    "residual ${"%.4f".format(it.residualBefore)} -> ${"%.4f".format(it.residualAfter)} " +
+                    "(${"%.2f".format(it.improvement)}x) iter=${it.iterations} converged=${it.converged}",
+            )
+        }
 
         // Measured on the anchor rather than any frame: it is the reference
         // every other frame is compared against, so its noise is what the
         // threshold has to admit.
-        val anchorRecord = burst.frames.first { it.index == plan.anchorIndex }
-        val measuredNoise = NoiseModel.estimateNoise(BurstReader.readLuma(directory, anchorRecord))
+        val measuredNoise = NoiseModel.estimateNoise(anchorLuma)
         val sigma = rejectSigma ?: NoiseModel.sigmaFor(measuredNoise)
 
         // Frames are read one at a time and released as soon as the GPU has
@@ -112,7 +141,9 @@ class BurstReplayer(private val outputDir: File) {
         }
 
         outputDir.mkdirs()
-        val output = File(outputDir, "${directory.name}-s${"%.2f".format(sigma)}.jpg")
+        // Unrefined output is named apart, so a before-and-after does not overwrite itself.
+        val suffix = if (refine) "" else "-gyro"
+        val output = File(outputDir, "${directory.name}-s${"%.2f".format(sigma)}$suffix.jpg")
         FileOutputStream(output).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
         }
@@ -131,6 +162,7 @@ class BurstReplayer(private val outputDir: File) {
             measuredNoise = measuredNoise,
             floatAccumulation = true,
             elapsedMillis = System.currentTimeMillis() - started,
+            refinement = refined?.results?.values?.toList() ?: emptyList(),
         )
     }
 }

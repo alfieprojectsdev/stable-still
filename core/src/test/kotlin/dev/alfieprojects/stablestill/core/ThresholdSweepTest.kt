@@ -1,7 +1,9 @@
 package dev.alfieprojects.stablestill.core
 
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.io.File
 import java.util.Random
 
 /**
@@ -124,5 +126,36 @@ class ThresholdSweepTest {
             "A static burst should stack nearly every frame at the ceiling",
             points[0].effectiveFrameCount > 5.0,
         )
+    }
+
+    @Test
+    fun `a real burst sweeps without a phone`() {
+        // -Dstablestill.burstDir=<burst with frames> prints the trade for that
+        // burst, gyro-only and then refined, so the knee and the ghost can be
+        // read side by side. Nothing asserted beyond the table existing: which
+        // way the numbers go is the burst's business, and the point of running
+        // it is to find out.
+        val dir = System.getProperty(BurstReplayTest.BURST_DIR_PROPERTY)
+        assumeTrue("Set -D${BurstReplayTest.BURST_DIR_PROPERTY} to sweep a real burst", dir != null)
+        val burst = BurstReader.read(File(dir!!))
+        val byIndex = burst.frames.associateBy { it.index }
+        val frames = HashMap<Int, YuvFrame>()
+        val frameAt = { i: Int -> frames.getOrPut(i) { BurstReader.readFrame(File(dir), byIndex.getValue(i)) } }
+
+        val gyroPlan = BurstAligner.plan(
+            burst.frames.map { it.toMeta() },
+            MotionTrack.integrate(burst.gyro),
+            burst.manifest.intrinsics,
+            burst.manifest.replayRig,
+            CropWindow(burst.manifest.width, burst.manifest.height, 0.12),
+        )
+        val refined = OpticalRefinement.refinePlan(gyroPlan) { i -> frameAt(i).luma() }
+        val sigmas = listOf(0.03f, 0.06f, 0.09f, 0.12f, 0.15f, 0.20f, 0.25f, 0.30f, 0.40f, 0.60f)
+
+        for ((label, plan) in listOf("gyro-only" to gyroPlan, "refined" to refined.plan)) {
+            val table = ThresholdSweep.format(ThresholdSweep.sweep(plan, sigmas, frameAt = frameAt))
+            println("${File(dir).name} $label (anchor ${plan.anchorIndex}, ${plan.usableCount}/${plan.alignments.size} usable):\n$table")
+            assertTrue(table.isNotBlank())
+        }
     }
 }

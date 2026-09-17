@@ -53,7 +53,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Stacks a saved burst and logs the result, then finishes. The newest,
-     * unless `--es burst <directoryName>` names another.
+     * unless `--es burst <directoryName>` names another. `--ez refine false`
+     * skips optical refinement, for comparing against the gyro-only plan.
      *
      * `adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
      *     --ez autoReplay true`
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
                         .replay(
                             selectBurst(intent.getStringExtra("burst")),
                             rejectSigma = intent.getStringExtra("rejectSigma")?.toFloatOrNull(),
+                            refine = intent.getBooleanExtra("refine", true),
                         )
                 }
             }
@@ -79,7 +81,9 @@ class MainActivity : ComponentActivity() {
                     AUTO_REPLAY_TAG,
                     "OK source=${it.sourceDirectory.name} merged=${it.framesMerged}/${it.framesTotal} " +
                         "anchor=${it.anchorIndex} out=${it.outputWidth}x${it.outputHeight} " +
-                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px noise=${"%.4f".format(it.measuredNoise)} sigma=${"%.3f".format(it.rejectSigma)} ms=${it.elapsedMillis} " +
+                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px refined=${it.refinement.size} " +
+                        "resid=${it.refinement.map { r -> r.residualAfter }.average().let { v -> if (v.isNaN()) "-" else "%.4f".format(v) }} " +
+                        "noise=${"%.4f".format(it.measuredNoise)} sigma=${"%.3f".format(it.rejectSigma)} ms=${it.elapsedMillis} " +
                         "file=${it.output.absolutePath}",
                 )
             }.onFailure { Log.e(AUTO_REPLAY_TAG, "FAILED: ${it.stackTraceToString()}") }
