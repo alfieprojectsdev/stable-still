@@ -80,8 +80,25 @@ data class CameraIntrinsics(
 data class RigAlignment(
     val sensorOrientationDegrees: Int,
     val frontFacing: Boolean = false,
-    val handedness: Int = 1,
+    val handedness: Int = SETTLED_HANDEDNESS,
 ) {
+    companion object {
+        /**
+         * Measured, on 17 September 2026, and it is not the sign the code shipped
+         * with. Four bursts from the A07 - two indoor, one rooftop, one from the
+         * 5 September archive - were aligned under both signs and scored by how
+         * far the warped frames sat from the anchor. Every one chose -1, by
+         * margins of 39% to 130%, with the two hypotheses placing a crop corner
+         * 55 to 459 px apart, far past the 2 px at which `RigCalibration`
+         * declines to answer.
+         *
+         * The derived +1 had been *adding* the rotation to every frame rather
+         * than removing it. Every corner-shift and crop figure recorded before
+         * this date was computed through that sign.
+         */
+        const val SETTLED_HANDEDNESS = -1
+    }
+
     init {
         require(sensorOrientationDegrees % 90 == 0) { "SENSOR_ORIENTATION must be a multiple of 90" }
         require(handedness == 1 || handedness == -1) { "handedness must be +1 or -1" }

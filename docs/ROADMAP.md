@@ -75,27 +75,50 @@ with a moving element.
 
 ---
 
-## Phase 4 - Calibration and optical refinement ⬜ designed, not implemented
+## Phase 4 - Calibration and optical refinement 🟨 built in `:core`, never run on hardware
 
-This is where "works in principle" becomes "works on this phone". Three pieces:
+This is where "works in principle" becomes "works on this phone". What the
+probe left standing is two pieces, not three - it measured the camera and
+sensor clocks as shared, so **4a solves for zero and is deleted**.
 
-**4a. Clock-sync auto-calibration.** `SyncCalibration.search` is written and
-tested against synthetic cost functions; what is missing is the real cost
-function - warp the burst at a candidate offset and measure residual
-misalignment. Run once, persist the answer.
+**4b. Rig handedness resolution.** ✅ `RigCalibration.settleHandedness` warps
+the burst both ways and keeps whichever leaves the frames agreeing with the
+anchor. Tested against bursts rendered *through* a stated handedness, so there
+is a right answer to find rather than a plausible one to accept.
 
-**4b. Rig handedness resolution.** `RigAlignment.handedness` encodes the sign of
-the rotation between gyro and camera axes. Rather than deriving it and hoping,
-try both and keep whichever reduces residual motion. Same harness as 4a.
+The burst has to be the right burst, and this is the part to know before
+capturing one: handedness enters only through a rotation about the optical
+axis, and rotations about that axis commute with it, so a burst that only
+**rolls** gives both signs identical homographies. Pitch and yaw separate them.
+The verdict refuses to choose when the two hypotheses land within a pixel of
+each other, rather than returning a coin toss that would then travel in every
+subsequent manifest.
 
-**4c. Optical refinement.** After the gyro warp, estimate a residual translation
-per frame by coarse-to-fine normalised cross-correlation on downsampled luma.
-This does three jobs at once: absorbs leftover sync error, absorbs the parallax
-the pure-rotation model cannot represent, and **becomes the primary alignment
-mechanism if the probe grades the gyroscope unusable**.
+**Run on 17 September against four real bursts: -1, unanimously**, by margins
+of 39% to 130% with the hypotheses 55 to 459 px apart. The code had shipped
+with +1. `RigAlignment.SETTLED_HANDEDNESS` carries the measurement, and
+archives captured before that date align through `BurstManifest.replayRig`.
 
-**Exit criterion:** residual misalignment under 1 px on a static scene, and the
-no-gyro fallback produces a usable stack.
+**4c. Optical refinement.** ✅ `OpticalRefinement` is Lucas-Kanade on a luma
+pyramid, estimating a residual **translation** per frame - the term a gyroscope
+structurally cannot see, and the one parallax at close range produces. Not
+normalised cross-correlation as sketched here: a gradient method reaches
+sub-pixel accuracy directly instead of interpolating a correlation peak, and the
+exposure cap holds gain constant across the burst so NCC's normalisation buys
+nothing.
+
+It does the jobs listed here and one more that was not anticipated: because the
+rejection threshold's ceiling is set by alignment residual rather than by gain,
+refinement **raises the ceiling** and buys back stacking the ceiling forgoes.
+Measured on a synthetic burst, misalignment of a few pixels costs most of the
+stack at sigma 0.15 and refinement returns it.
+
+**Still open:** neither has met a real frame, and neither is wired into `:app`.
+The refiner reports the residual it leaves, which is the number that decides
+whether a translation is enough or the model has to grow.
+
+**Exit criterion:** residual misalignment under 1 px on a static scene *of a
+real burst*, and the no-gyro fallback produces a usable stack.
 
 ---
 

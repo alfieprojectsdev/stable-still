@@ -52,7 +52,9 @@ class MainActivity : ComponentActivity() {
     ) { granted -> hasCameraPermission = granted }
 
     /**
-     * Stacks the newest saved burst and logs the result, then finishes.
+     * Stacks a saved burst and logs the result, then finishes. The newest,
+     * unless `--es burst <directoryName>` names another. `--ez refine false`
+     * skips optical refinement, for comparing against the gyro-only plan.
      *
      * `adb shell am start -n dev.alfieprojects.stablestill/.ui.MainActivity \
      *     --ez autoReplay true`
@@ -68,8 +70,9 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) {
                     BurstReplayer(File(getExternalFilesDir(null), "captures"))
                         .replay(
-                            BurstCaptureController(this@MainActivity).savedBursts().first(),
+                            selectBurst(intent.getStringExtra("burst")),
                             rejectSigma = intent.getStringExtra("rejectSigma")?.toFloatOrNull(),
+                            refine = intent.getBooleanExtra("refine", true),
                         )
                 }
             }
@@ -78,12 +81,29 @@ class MainActivity : ComponentActivity() {
                     AUTO_REPLAY_TAG,
                     "OK source=${it.sourceDirectory.name} merged=${it.framesMerged}/${it.framesTotal} " +
                         "anchor=${it.anchorIndex} out=${it.outputWidth}x${it.outputHeight} " +
-                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px noise=${"%.4f".format(it.measuredNoise)} sigma=${"%.3f".format(it.rejectSigma)} ms=${it.elapsedMillis} " +
+                        "shift=${"%.1f".format(it.maxCornerShiftPx)}px refined=${it.refinement.size} " +
+                        "resid=${it.refinement.map { r -> r.residualAfter }.average().let { v -> if (v.isNaN()) "-" else "%.4f".format(v) }} " +
+                        "noise=${"%.4f".format(it.measuredNoise)} sigma=${"%.3f".format(it.rejectSigma)} ms=${it.elapsedMillis} " +
                         "file=${it.output.absolutePath}",
                 )
             }.onFailure { Log.e(AUTO_REPLAY_TAG, "FAILED: ${it.stackTraceToString()}") }
             finish()
         }
+    }
+
+    /**
+     * The burst [name] asks for, or the newest if it asks for none.
+     *
+     * A threshold sweep has to hold the input still while the threshold moves,
+     * and "newest" stops being a fixed input the moment another burst is
+     * captured - including the control burst the sweep is compared against.
+     */
+    private fun selectBurst(name: String?): File {
+        val saved = BurstCaptureController(this).savedBursts()
+        check(saved.isNotEmpty()) { "No saved bursts to replay" }
+        if (name == null) return saved.first()
+        return saved.firstOrNull { it.name == name }
+            ?: error("No burst named $name - have ${saved.map { it.name }}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

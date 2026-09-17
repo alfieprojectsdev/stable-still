@@ -115,7 +115,7 @@ class BurstReplayTest {
         val metas = burst.frames.map { it.toMeta() }
         val crop = CropWindow(burst.manifest.width, burst.manifest.height, 0.12)
         val plan = BurstAligner.plan(
-            metas, track, burst.manifest.intrinsics, burst.manifest.rig, crop,
+            metas, track, burst.manifest.intrinsics, burst.manifest.replayRig, crop,
         )
 
         val worst = plan.alignments.maxOf { it.maxCornerShiftPx }
@@ -162,7 +162,7 @@ class BurstReplayTest {
             burst.frames.map { it.toMeta() },
             track,
             burst.manifest.intrinsics,
-            burst.manifest.rig,
+            burst.manifest.replayRig,
             CropWindow(burst.manifest.width, burst.manifest.height, 0.12),
         )
         val sharpness = planes.map { it.sharpness() }
